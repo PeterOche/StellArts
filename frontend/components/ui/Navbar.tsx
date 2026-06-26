@@ -1,15 +1,15 @@
-'use client';
+"use client";
 
-import { useState, useEffect } from 'react';
-import { useTheme } from 'next-themes';
-import { Button } from './button';
-import Link from 'next/link';
-import Image from 'next/image';
-import { useWallet } from '../../context/WalletContext';
-import { useAuth } from '../../context/AuthContext';
-import CurrencySelector from './CurrencySelector';
-import NotificationBell from './NotificationBell';
-import { Menu, X, Sun, Moon } from 'lucide-react';
+import { useState, useEffect } from "react";
+import { useTheme } from "next-themes";
+import { Button } from "./button";
+import Link from "next/link";
+import Image from "next/image";
+import { useWallet } from "../../context/WalletContext";
+import { useAuth } from "../../context/AuthContext";
+import CurrencySelector from "./CurrencySelector";
+import NotificationBell from "./NotificationBell";
+import { Menu, X, Sun, Moon } from "lucide-react";
 
 function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme();
@@ -21,11 +21,11 @@ function ThemeToggle() {
 
   return (
     <button
-      onClick={() => setTheme(resolvedTheme === 'dark' ? 'light' : 'dark')}
+      onClick={() => setTheme(resolvedTheme === "dark" ? "light" : "dark")}
       aria-label="Toggle dark mode"
       className="p-2 rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
     >
-      {resolvedTheme === 'dark' ? (
+      {resolvedTheme === "dark" ? (
         <Sun className="w-5 h-5" />
       ) : (
         <Moon className="w-5 h-5" />
@@ -74,7 +74,6 @@ export default function Navbar() {
     <header className="fixed top-0 left-0 right-0 z-50 bg-background/80 backdrop-blur-md border-b border-border w-full">
       <nav className="mx-auto max-w-6xl px-6 py-4">
         <div className="flex items-center justify-between">
-
           {/* Logo */}
           <Link href="/" className="flex items-center">
             <div className="w-10 h-10 bg-accent rounded-lg flex items-center justify-center overflow-hidden">
@@ -93,19 +92,49 @@ export default function Navbar() {
 
           {/* Desktop Nav */}
           <div className="hidden md:flex items-center space-x-8">
-            <Link href="/#features" className="text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="/#features"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
               Features
             </Link>
-            <Link href="/#use-cases" className="text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="/#use-cases"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
               Use Cases
             </Link>
-            <Link href="/#why-stellar" className="text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="/#why-stellar"
+              className="text-muted-foreground hover:text-foreground transition-colors"
+            >
               Why Stellar
             </Link>
 
             {isAuthenticated && (
-              <Link href="/dashboard" className="text-muted-foreground hover:text-foreground transition-colors">
+              <Link
+                href="/dashboard"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
                 Dashboard
+              </Link>
+            )}
+
+            {isAuthenticated && (
+              <Link
+                href="/analytics"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Analytics
+              </Link>
+            )}
+
+            {isAuthenticated && (
+              <Link
+                href="/settings"
+                className="text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Settings
               </Link>
             )}
 
@@ -149,19 +178,55 @@ export default function Navbar() {
         {/* Mobile Menu */}
         {isMenuOpen && (
           <div className="md:hidden mt-4 pt-4 pb-4 border-t border-border space-y-4">
-            <Link href="/#features" onClick={() => setIsMenuOpen(false)} className="block text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="/#features"
+              onClick={() => setIsMenuOpen(false)}
+              className="block text-muted-foreground hover:text-foreground transition-colors"
+            >
               Features
             </Link>
-            <Link href="/#use-cases" onClick={() => setIsMenuOpen(false)} className="block text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="/#use-cases"
+              onClick={() => setIsMenuOpen(false)}
+              className="block text-muted-foreground hover:text-foreground transition-colors"
+            >
               Use Cases
             </Link>
-            <Link href="/#why-stellar" onClick={() => setIsMenuOpen(false)} className="block text-muted-foreground hover:text-foreground transition-colors">
+            <Link
+              href="/#why-stellar"
+              onClick={() => setIsMenuOpen(false)}
+              className="block text-muted-foreground hover:text-foreground transition-colors"
+            >
               Why Stellar
             </Link>
 
             {isAuthenticated && (
-              <Link href="/dashboard" onClick={() => setIsMenuOpen(false)} className="block text-muted-foreground hover:text-foreground transition-colors">
+              <Link
+                href="/dashboard"
+                onClick={() => setIsMenuOpen(false)}
+                className="block text-muted-foreground hover:text-foreground transition-colors"
+              >
                 Dashboard
+              </Link>
+            )}
+
+            {isAuthenticated && (
+              <Link
+                href="/analytics"
+                onClick={() => setIsMenuOpen(false)}
+                className="block text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Analytics
+              </Link>
+            )}
+
+            {isAuthenticated && (
+              <Link
+                href="/settings"
+                onClick={() => setIsMenuOpen(false)}
+                className="block text-muted-foreground hover:text-foreground transition-colors"
+              >
+                Settings
               </Link>
             )}
 
