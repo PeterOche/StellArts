@@ -1809,6 +1809,113 @@ mod cleanup_tests {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Issue - Security Enhancement - Reentrancy tests
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod reentrancy_tests {
+    use crate::{EscrowContract, EscrowContractClient};
+    use soroban_sdk::{contract, contractimpl, testutils::Address as _, vec, Address, Env};
+
+    // A mock token that attempts to reenter the escrow contract during a transfer
+    #[contract]
+    pub struct MaliciousToken;
+
+    #[contractimpl]
+    impl MaliciousToken {
+        pub fn transfer(env: Env, _from: Address, _to: Address, _amount: i128) {
+            let should_reenter: bool = env
+                .storage()
+                .instance()
+                .get(&soroban_sdk::Symbol::new(&env, "reenter"))
+                .unwrap_or(false);
+            if should_reenter {
+                // Prevent infinite loop by clearing the flag
+                env.storage()
+                    .instance()
+                    .set(&soroban_sdk::Symbol::new(&env, "reenter"), &false);
+
+                let escrow_addr: Address = env
+                    .storage()
+                    .instance()
+                    .get(&soroban_sdk::Symbol::new(&env, "escrow"))
+                    .unwrap();
+                let engagement_id: u64 = env
+                    .storage()
+                    .instance()
+                    .get(&soroban_sdk::Symbol::new(&env, "id"))
+                    .unwrap();
+
+                let client = EscrowContractClient::new(&env, &escrow_addr);
+
+                // Reenter the release function
+                client.release(&engagement_id, &env.current_contract_address());
+            }
+        }
+
+        pub fn setup(env: Env, escrow: Address, id: u64) {
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::Symbol::new(&env, "escrow"), &escrow);
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::Symbol::new(&env, "id"), &id);
+        }
+
+        pub fn set_reenter(env: Env, reenter: bool) {
+            env.storage()
+                .instance()
+                .set(&soroban_sdk::Symbol::new(&env, "reenter"), &reenter);
+        }
+    }
+
+    #[test]
+    #[should_panic(expected = "Error(Context, InvalidAction)")]
+    fn test_reentrancy_lock_prevents_reentrant_release() {
+        let env = Env::default();
+        env.mock_all_auths_allowing_non_root_auth();
+
+        let contract_id = env.register_contract(None, EscrowContract);
+        let client = EscrowContractClient::new(&env, &contract_id);
+
+        let token_id = env.register_contract(None, MaliciousToken);
+
+        let client_addr = Address::generate(&env);
+        let artisan_addr = Address::generate(&env);
+        let arbitrator = Address::generate(&env);
+        let amount = 1_000i128;
+        let deadline = env.ledger().timestamp() + 86400;
+
+        let id = client.initialize(
+            &client_addr,
+            &artisan_addr,
+            &arbitrator,
+            &token_id,
+            &amount,
+            &0i128,
+            &deadline,
+            &vec![&env],
+            &0u32,
+        );
+
+        // Setup malicious token to know the escrow address and engagement id
+        env.as_contract(&token_id, || {
+            MaliciousToken::setup(env.clone(), contract_id.clone(), id);
+        });
+
+        // First deposit: we do not enable reentrancy yet, to allow deposit to succeed
+        client.deposit(&id, &token_id);
+
+        // Now enable reentrancy flag for the release call
+        env.as_contract(&token_id, || {
+            MaliciousToken::set_reenter(env.clone(), true);
+        });
+
+        // This release will trigger the token transfer, which will try to reenter release
+        client.release(&id, &token_id);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Issue #297 – Material/Labor Split tests
 // ─────────────────────────────────────────────────────────────────────────────
 #[cfg(test)]
