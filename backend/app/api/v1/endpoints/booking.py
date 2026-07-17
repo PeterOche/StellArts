@@ -38,9 +38,9 @@ from app.services import notification_service
 from app.services.ai_service import ai_service
 from app.services.completion_verification import assess_booking_completion
 from app.services.geolocation import geolocation_service
+from app.services.inventory import inventory_service
 from app.services.scheduling import scheduling_service
 from app.services.soroban import transition_to_in_progress
-from app.services.inventory import inventory_service
 
 logger = logging.getLogger(__name__)
 
@@ -287,13 +287,13 @@ def update_booking_status(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the artisan can confirm a booking",
             )
-            
+
         if status_payload.required_materials and not booking.client_supplies_override:
             # Trigger inventory check in background
             asyncio.create_task(
                 inventory_service.check_route_inventory(
-                    artisan=user_artisan, 
-                    booking=booking, 
+                    artisan=user_artisan,
+                    booking=booking,
                     required_materials=status_payload.required_materials
                 )
             )
