@@ -41,9 +41,16 @@ class BookingCreate(BaseModel):
 class BookingStatusUpdate(BaseModel):
     """Schema for updating booking status"""
 
-    model_config = ConfigDict(json_schema_extra={"example": {"status": "confirmed"}})
+    model_config = ConfigDict(json_schema_extra={"example": {"status": "confirmed", "required_materials": ["copper pipe"]}})
 
     status: str = Field(..., description="New status for the booking")
+    required_materials: list[str] | None = Field(None, description="Optional list of required materials for the job")
+
+
+class ClientSuppliesOverrideRequest(BaseModel):
+    """Schema for client to indicate they have the supplies"""
+    
+    client_supplies_override: bool = Field(True, description="True if client has supplies")
 
 
 class BidCreate(BaseModel):
@@ -120,6 +127,7 @@ class BookingResponse(BaseModel):
     status: str
     location: str | None
     notes: str | None
+    client_supplies_override: bool = False
     created_at: datetime
     updated_at: datetime | None
 
