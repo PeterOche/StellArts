@@ -28,6 +28,7 @@ from app.schemas.booking import (
     BookingCreate,
     BookingResponse,
     BookingStatusUpdate,
+    ClientSuppliesOverrideRequest,
     ProposedSlotResponse,
     ProposeSlotsRequest,
     ReviewCreate,
@@ -37,6 +38,7 @@ from app.services import notification_service
 from app.services.ai_service import ai_service
 from app.services.completion_verification import assess_booking_completion
 from app.services.geolocation import geolocation_service
+from app.services.inventory import inventory_service
 from app.services.scheduling import scheduling_service
 from app.services.soroban import transition_to_in_progress
 
@@ -284,6 +286,16 @@ def update_booking_status(
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="Only the artisan can confirm a booking",
+            )
+
+        if status_payload.required_materials and not booking.client_supplies_override:
+            # Trigger inventory check in background
+            asyncio.create_task(
+                inventory_service.check_route_inventory(
+                    artisan=user_artisan,
+                    booking=booking,
+                    required_materials=status_payload.required_materials,
+                )
             )
 
     # CONFIRMED -> IN_PROGRESS: Only artisan can perform this transition
@@ -580,6 +592,38 @@ async def propose_slots(
         target_date=payload.target_date,
     )
     return slots
+
+
+@router.put("/{booking_id}/supplies-override")
+def update_supplies_override(
+    booking_id: UUID,
+    override_data: ClientSuppliesOverrideRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_client),
+):
+    """
+    Allow the client to indicate they already possess the necessary materials at the job site.
+    This bypasses the inventory check.
+    """
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    client = db.query(Client).filter(Client.user_id == current_user.id).first()
+    if not client or booking.client_id != client.id:
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to update this booking"
+        )
+
+    booking.client_supplies_override = override_data.client_supplies_override
+    db.commit()
+    db.refresh(booking)
+
+    return {
+        "status": "success",
+        "message": "Client supplies override updated",
+        "client_supplies_override": booking.client_supplies_override,
+    }
 
 
 @router.post("/{booking_id}/review", response_model=ReviewResponse)

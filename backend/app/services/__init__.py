@@ -15,5 +15,15 @@ class NotificationService:
     async def dispatch_to_matched_artisans(db, booking, limit=5):
         return []
 
+    @staticmethod
+    def dispatch_push_notification(artisan_id: int, message: str):
+        # Mock push notification dispatch
+        print(f"[PUSH NOTIFICATION] Artisan {artisan_id}: {message}")
+        return {
+            "artisan_id": artisan_id,
+            "message": message,
+            "status": "pushed",
+        }
+
 
 notification_service = NotificationService()
