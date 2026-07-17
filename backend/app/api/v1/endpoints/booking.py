@@ -710,4 +710,3 @@ async def create_review(
         # We don't fail the API request if the on-chain call fails
 
     return review
->>>>>>> origin/main

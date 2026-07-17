@@ -2,8 +2,8 @@ import enum
 import uuid
 
 from sqlalchemy import (
-    Boolean,
     DECIMAL,
+    Boolean,
     Column,
     DateTime,
     Enum,
