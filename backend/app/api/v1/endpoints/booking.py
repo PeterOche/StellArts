@@ -294,7 +294,7 @@ def update_booking_status(
                 inventory_service.check_route_inventory(
                     artisan=user_artisan,
                     booking=booking,
-                    required_materials=status_payload.required_materials
+                    required_materials=status_payload.required_materials,
                 )
             )
 
