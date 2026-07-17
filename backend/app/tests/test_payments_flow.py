@@ -1,8 +1,7 @@
-from uuid import UUID
+from decimal import Decimal
+from unittest.mock import patch
+from uuid import uuid4
 
-from stellar_sdk import Keypair, Network, TransactionEnvelope
-
-from app.models.payment import Payment, PaymentStatus
 from app.services import payments
 
 
@@ -50,71 +49,131 @@ def create_booking(client, artisan_headers, client_headers):
     return resp.json()["id"]
 
 
-def test_payments_prepare_and_submit(monkeypatch, client, db_session):
-    # create both roles and booking
-    artisan_headers = get_auth_headers(client, "artpay@test.com", "Pass123!", "artisan")
-    client_headers = get_auth_headers(client, "clipay@test.com", "Pass123!", "client")
+# Fake XDR string returned by the mocked soroban deposit builder
+FAKE_SOROBAN_XDR = "AAAAAgAAAAA="
+
+
+def test_payments_prepare_returns_soroban_xdr(monkeypatch, client, db_session):
+    """
+    prepare_payment should delegate to soroban.prepare_escrow_deposit and
+    return the unsigned Soroban XDR without hitting a live RPC.
+    """
+    artisan_headers = get_auth_headers(
+        client, "artpay2@test.com", "Pass123!", "artisan"
+    )
+    client_headers = get_auth_headers(client, "clipay2@test.com", "Pass123!", "client")
 
     booking_id = create_booking(client, artisan_headers, client_headers)
 
-    # generate a dummy keypair for the client wallet
-    kp = Keypair.random()
-    client_pub = kp.public_key
+    # Patch at the service level so no Soroban RPC is contacted
+    with patch(
+        "app.services.soroban.prepare_escrow_deposit",
+        return_value=FAKE_SOROBAN_XDR,
+    ):
+        resp = client.post(
+            "api/v1/payments/prepare",
+            json={
+                "booking_id": booking_id,
+                "amount": 100.5,
+                "client_public": "GABC1234DUMMYPUBLIC",
+            },
+            headers=client_headers,
+        )
 
-    # patch the server object to avoid outside network calls
-    class DummyServer:
-        def submit_transaction(self, tx):
-            return {"hash": "FAKEHASH"}
-
-    monkeypatch.setattr(payments, "server", DummyServer())
-
-    # 1. prepare
-    resp = client.post(
-        "api/v1/payments/prepare",
-        json={"booking_id": booking_id, "amount": 100.5, "client_public": client_pub},
-        headers=client_headers,
-    )
     assert resp.status_code == 200
     payload = resp.json()
     assert payload["status"] == "prepared"
-    unsigned_xdr = payload["unsigned_xdr"]
+    assert payload["unsigned_xdr"] == FAKE_SOROBAN_XDR
+    assert payload["booking_id"] == booking_id
+    assert payload["amount"] == "100.5"
 
-    # verify we got a valid transaction envelope back
-    tx = TransactionEnvelope.from_xdr(
-        unsigned_xdr, network_passphrase=Network.TESTNET_NETWORK_PASSPHRASE
+
+def test_payments_prepare_forwards_escrow_error(monkeypatch, client, db_session):
+    """
+    If prepare_escrow_deposit raises (e.g. no contract configured), prepare_payment
+    must return status='error' rather than crashing.
+    """
+    artisan_headers = get_auth_headers(
+        client, "artpay3@test.com", "Pass123!", "artisan"
     )
-    assert len(tx.transaction.operations) == 1
-    assert tx.transaction.operations[0].destination.account_id == payments.ESCROW_PUBLIC
+    client_headers = get_auth_headers(client, "clipay3@test.com", "Pass123!", "client")
 
-    # sign with our secret
-    tx.sign(kp)
-    signed_xdr = tx.to_xdr()
+    booking_id = create_booking(client, artisan_headers, client_headers)
 
-    # 2. submit
-    resp2 = client.post(
-        "api/v1/payments/submit",
-        json={"signed_xdr": signed_xdr},
-        headers=client_headers,
-    )
-    assert resp2.status_code == 200
-    body = resp2.json()
-    assert body["status"] == "success"
-    assert body["transaction_hash"] == "FAKEHASH"
-
-    # verify a record was committed to the database
-    held = (
-        db_session.query(Payment)
-        .filter(
-            Payment.booking_id == UUID(booking_id),
-            Payment.status == PaymentStatus.HELD,
+    with patch(
+        "app.services.soroban.prepare_escrow_deposit",
+        side_effect=RuntimeError("Escrow contract ID not configured"),
+    ):
+        resp = client.post(
+            "api/v1/payments/prepare",
+            json={
+                "booking_id": booking_id,
+                "amount": 50.0,
+                "client_public": "GABC1234DUMMYPUBLIC",
+            },
+            headers=client_headers,
         )
-        .first()
-    )
-    assert held is not None
-    assert held.transaction_hash == "FAKEHASH"
+
+    assert resp.status_code == 200
+    payload = resp.json()
+    assert payload["status"] == "error"
+    assert "Escrow contract ID not configured" in payload["message"]
 
 
 def test_hold_endpoint_removed(client):
     # any call to /payments/hold should 404
     resp = client.post("api/v1/payments/hold", json={})
     assert resp.status_code in (404, 405)
+
+
+def test_release_payment_uses_soroban(client, db_session):
+    """
+    release_payment should call soroban.prepare_escrow_release and
+    submit_soroban_transaction instead of the old Horizon path.
+    """
+    from app.models.payment import Payment, PaymentStatus
+
+    booking_uuid = uuid4()
+
+    # Seed a HELD payment record directly into the test DB
+    held = Payment(
+        booking_id=booking_uuid,
+        transaction_hash="OLDHASH",
+        status=PaymentStatus.HELD,
+        amount=Decimal("75.0"),
+        from_account="GCLIENT",
+        to_account="GESCROW",
+        memo="hold-test",
+        asset_code="XLM",
+        asset_issuer=None,
+    )
+    db_session.add(held)
+    db_session.commit()
+
+    with (
+        patch(
+            "app.services.soroban.prepare_escrow_release",
+            return_value=FAKE_SOROBAN_XDR,
+        ),
+        patch("app.services.soroban.get_backend_signer") as mock_signer,
+        patch(
+            "app.services.soroban.submit_soroban_transaction",
+            return_value={"status": "SUCCESS", "hash": "SOROBANHASH"},
+        ),
+        patch("stellar_sdk.TransactionEnvelope.from_xdr") as mock_env,
+    ):
+        from stellar_sdk import Keypair
+
+        mock_signer.return_value = Keypair.random()
+        mock_tx = mock_env.return_value
+        mock_tx.to_xdr.return_value = FAKE_SOROBAN_XDR
+
+        result = payments.release_payment(
+            db=db_session,
+            booking_id=str(booking_uuid),
+            artisan_public="GARTISAN",
+            amount=Decimal("75.0"),
+        )
+
+    assert result.get("status") != "error", result.get("message")
+    assert result.get("transaction_hash") == "SOROBANHASH"

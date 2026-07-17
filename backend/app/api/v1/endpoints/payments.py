@@ -1,4 +1,5 @@
 # app/api/v1/endpoints/payments.py
+import logging
 import uuid
 from decimal import Decimal
 
@@ -7,10 +8,12 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from stellar_sdk import TransactionEnvelope
 
-from app.core.auth import require_client, require_client_or_artisan
+from app.core.auth import require_admin, require_client, require_client_or_artisan
 from app.core.config import settings
 from app.db.session import get_db
 from app.models.booking import Booking
+from app.models.client import Client
+from app.models.payment import Payment
 from app.models.user import User
 from app.services import payments as payments_service
 from app.services.payments import (
@@ -19,6 +22,8 @@ from app.services.payments import (
     release_payment,
     submit_signed_payment,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -47,6 +52,93 @@ class RefundRequest(BaseModel):
     booking_id: str
     client_public: str
     amount: Decimal = Field(..., gt=0)
+
+
+class PaymentHistoryItem(BaseModel):
+    id: str
+    booking_id: str
+    amount: Decimal
+    transaction_hash: str | None
+    status: str
+    asset_code: str
+    created_at: str
+    service: str | None = None
+    counterparty: str | None = None
+
+
+@router.get("/my-payments", summary="List payment history for current user")
+def my_payments(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_client_or_artisan),
+):
+    """Return payments associated with the current user's bookings."""
+    booking_ids: list[uuid.UUID] = []
+
+    if current_user.role == "client":
+        client = db.query(Client).filter(Client.user_id == current_user.id).first()
+        if client:
+            booking_ids = [
+                row[0]
+                for row in db.query(Booking.id)
+                .filter(Booking.client_id == client.id)
+                .all()
+            ]
+    elif current_user.role == "artisan":
+        from app.models.artisan import Artisan
+
+        artisan = db.query(Artisan).filter(Artisan.user_id == current_user.id).first()
+        if artisan:
+            booking_ids = [
+                row[0]
+                for row in db.query(Booking.id)
+                .filter(Booking.artisan_id == artisan.id)
+                .all()
+            ]
+
+    if not booking_ids:
+        return []
+
+    payments = (
+        db.query(Payment)
+        .filter(Payment.booking_id.in_(booking_ids))
+        .order_by(Payment.created_at.desc())
+        .all()
+    )
+
+    results: list[PaymentHistoryItem] = []
+    for payment in payments:
+        booking = db.query(Booking).filter(Booking.id == payment.booking_id).first()
+        service = booking.service if booking else None
+        counterparty = None
+        if booking:
+            if current_user.role == "client" and booking.artisan:
+                counterparty = (
+                    booking.artisan.user.full_name
+                    if booking.artisan.user
+                    else f"Artisan #{booking.artisan_id}"
+                )
+            elif current_user.role == "artisan" and booking.client:
+                counterparty = (
+                    booking.client.user.full_name
+                    if booking.client.user
+                    else f"Client #{booking.client_id}"
+                )
+
+        results.append(
+            PaymentHistoryItem(
+                id=str(payment.id),
+                booking_id=str(payment.booking_id),
+                amount=payment.amount,
+                transaction_hash=payment.transaction_hash,
+                status=payment.status.value if payment.status else "pending",
+                asset_code=payment.asset_code,
+                created_at=payment.created_at.isoformat(),
+                service=service,
+                counterparty=counterparty,
+            )
+        )
+
+    return results
 
 
 # The old /hold endpoint has been removed due to security concerns. Clients
@@ -175,8 +267,13 @@ def submit(
 def release(
     req: ReleaseRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_client),
+    current_user: User = Depends(require_admin),
 ):
+    logger.info(
+        "Admin %s triggered release for payment %s",
+        current_user.id,
+        req.booking_id,
+    )
     try:
         booking_uuid = uuid.UUID(str(req.booking_id))
     except ValueError:
@@ -185,12 +282,6 @@ def release(
     booking = db.query(Booking).filter(Booking.id == booking_uuid).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
-
-    if booking.client.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not authorized to release payment for this booking",
-        )
 
     res = release_payment(db, req.booking_id, req.artisan_public, req.amount)
     if res.get("status") == "error":
@@ -202,8 +293,13 @@ def release(
 def refund(
     req: RefundRequest,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_client_or_artisan),
+    current_user: User = Depends(require_admin),
 ):
+    logger.info(
+        "Admin %s triggered refund for payment %s",
+        current_user.id,
+        req.booking_id,
+    )
     try:
         booking_uuid = uuid.UUID(str(req.booking_id))
     except ValueError:
@@ -212,18 +308,6 @@ def refund(
     booking = db.query(Booking).filter(Booking.id == booking_uuid).first()
     if not booking:
         raise HTTPException(status_code=404, detail="Booking not found")
-
-    is_authorized = False
-    if current_user.role == "client" and booking.client.user_id == current_user.id:
-        is_authorized = True
-    elif current_user.role == "artisan" and booking.artisan.user_id == current_user.id:
-        is_authorized = True
-
-    if not is_authorized:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You are not authorized to refund payment for this booking",
-        )
 
     res = refund_payment(db, req.booking_id, req.client_public, req.amount)
     if res.get("status") == "error":

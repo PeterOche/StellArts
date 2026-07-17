@@ -1,9 +1,12 @@
+import asyncio
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
@@ -11,16 +14,22 @@ from app.api.v1.api import api_router
 from app.core.cache import cache
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
+from app.core.limiter import limiter
 from app.db.session import get_db
+from app.workers.soroban_event_worker import run_worker
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup
-    await cache.initialize()  # Cambio: connect() -> initialize()
+    await cache.initialize()
+    task = asyncio.create_task(run_worker())
     yield
-    # Shutdown
-    await cache.close()  # Cambio: disconnect() -> close()
+    task.cancel()
+    try:
+        await task
+    except asyncio.CancelledError:
+        pass
+    await cache.close()
 
 
 app = FastAPI(
@@ -29,6 +38,18 @@ app = FastAPI(
     debug=settings.DEBUG,
     lifespan=lifespan,
 )
+app.state.limiter = limiter
+
+
+def rate_limit_custom_handler(request: Request, exc: RateLimitExceeded):
+    response = _rate_limit_exceeded_handler(request, exc)
+    if "Retry-After" not in response.headers:
+        # Fallback to ensure the header is always present as required by tests/clients
+        response.headers["Retry-After"] = "60"
+    return response
+
+
+app.add_exception_handler(RateLimitExceeded, rate_limit_custom_handler)
 
 # Ensure static/avatars directory exists
 static_path = os.path.join(os.getcwd(), settings.STATIC_DIR)

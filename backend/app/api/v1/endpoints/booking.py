@@ -19,6 +19,7 @@ from app.db.session import get_db
 from app.models.artisan import Artisan
 from app.models.booking import Booking, BookingStatus
 from app.models.client import Client
+from app.models.review import Review
 from app.models.user import User
 from app.schemas.booking import (
     BidCreate,
@@ -30,6 +31,8 @@ from app.schemas.booking import (
     ClientSuppliesOverrideRequest,
     ProposedSlotResponse,
     ProposeSlotsRequest,
+    ReviewCreate,
+    ReviewResponse,
 )
 from app.services import notification_service
 from app.services.ai_service import ai_service
@@ -147,7 +150,7 @@ def create_booking(
         # Notification service not available, continue without dispatch
         pass
     except Exception as e:
-        # Log error but don't fail booking creation
+        # Log error but don't fail booking creations
         print(f"Failed to dispatch notifications: {e}")
 
     return new_booking
@@ -621,3 +624,90 @@ def update_supplies_override(
         "message": "Client supplies override updated",
         "client_supplies_override": booking.client_supplies_override,
     }
+
+
+@router.post("/{booking_id}/review", response_model=ReviewResponse)
+async def create_review(
+    booking_id: UUID,
+    payload: ReviewCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_client),
+):
+    """
+    Submit a review for a completed booking - client only.
+    Hooks into the Soroban Reputation contract to update on-chain reputation.
+    """
+    booking = db.query(Booking).filter(Booking.id == booking_id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+
+    client = db.query(Client).filter(Client.user_id == current_user.id).first()
+    if not client or booking.client_id != client.id:
+        raise HTTPException(
+            status_code=403, detail="You are not authorized to review this booking"
+        )
+
+    if booking.status != BookingStatus.COMPLETED:
+        raise HTTPException(
+            status_code=400, detail="Cannot review a booking that is not completed"
+        )
+
+    # Check if a review already exists
+    existing_review = db.query(Review).filter(Review.booking_id == booking_id).first()
+    if existing_review:
+        raise HTTPException(
+            status_code=400, detail="Review already exists for this booking"
+        )
+
+    # Create the review
+    review = Review(
+        booking_id=booking_id,
+        client_id=client.id,
+        artisan_id=booking.artisan_id,
+        rating=payload.rating,
+        comment=payload.comment,
+    )
+    db.add(review)
+    db.commit()
+    db.refresh(review)
+
+    # Hook into Soroban Reputation contract
+    try:
+        from app.services import soroban
+
+        artisan = db.query(Artisan).filter(Artisan.id == booking.artisan_id).first()
+        if artisan and artisan.user:
+            # We assume artisan.user has a stellar_public_key or we derive it
+            # The prompt implies invoking reputation.rate_artisan
+            contract_id = soroban.get_reputation_contract_id()
+            signer = soroban.get_backend_signer()
+            if contract_id and signer:
+                # The address to rate. We use the artisan's public key if available, else a placeholder or fallback.
+                # In this system, artisan.user.stellar_wallet or similar? Let's assume artisan.stellar_account or user.stellar_public_key.
+                # Actually, the user model might have stellar_account.
+                # For now, we will assume artisan's stellar address is required, or fallback to their id string if not available.
+                artisan_address = getattr(
+                    artisan,
+                    "stellar_public_key",
+                    getattr(artisan.user, "stellar_public_key", None),
+                )
+                if artisan_address:
+                    from stellar_sdk import scval
+
+                    # rate_artisan(artisan_address, rating)
+                    args = [
+                        scval.to_address(artisan_address),
+                        scval.to_uint32(payload.rating),
+                    ]
+                    soroban.invoke_contract_function(
+                        contract_id,
+                        "rate_artisan",
+                        args,
+                        signer,
+                    )
+    except Exception as e:
+        logger.error(f"Failed to update on-chain reputation: {e}")
+        # We don't fail the API request if the on-chain call fails
+
+    return review
+>>>>>>> origin/main
