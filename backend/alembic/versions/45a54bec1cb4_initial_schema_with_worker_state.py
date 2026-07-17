@@ -1,10 +1,10 @@
-"\""initial_schema_with_worker_state
+"""initial_schema_with_worker_state
 
 Revision ID: 45a54bec1cb4
 Revises: 74722ade6207
 Create Date: 2026-06-19 17:03:08.815919
 
-"\""
+"""
 from alembic import op
 import sqlalchemy as sa
 
