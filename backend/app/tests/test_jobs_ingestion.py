@@ -1,6 +1,3 @@
-
-
-
 def test_job_ingestion_success(client):
     file_content = b"test image content"
     files = {"files": ("test_image.jpeg", file_content, "image/jpeg")}
