@@ -69,7 +69,7 @@ class RedisClient:
         if not self.redis:
             return False
 
-        if isinstance(value, (dict, list)):
+        if isinstance(value, dict | list):
             value = json.dumps(value)
 
         await self.redis.lpush(key, value)

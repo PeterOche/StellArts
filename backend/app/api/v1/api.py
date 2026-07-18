@@ -7,10 +7,10 @@ from app.api.v1.endpoints import (
     booking,
     calendar,
     health,
+    jobs,
     payments,
     stats,
     user,
-    jobs,
 )
 
 api_router = APIRouter()
