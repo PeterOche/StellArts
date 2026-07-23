@@ -1,6 +1,9 @@
 #![no_std]
 
 use soroban_sdk::{contract, contractimpl, contracttype, token, vec, Address, Env, Symbol, Vec};
+// Protocol fee cap — 1000 bps = 10%. Prevents admin from misconfiguring
+// an unreasonably high fee; adjust if product requirements change.
+const MAX_FEE_BPS: u32 = 1_000;
 
 // TTL constants for persistent storage (in ledgers)
 // Note: Each ledger is approximately 5 seconds
@@ -21,6 +24,17 @@ pub struct MultiSigConfig {
     /// Number of approvals needed before release is permitted.
     pub threshold: u32,
 }
+
+/// Protocol fee configuration. `fee_basis_points` is out of 10_000
+/// (e.g. 250 = 2.5%). Fee is only applied to artisan payouts, never
+/// to client refunds.
+#[contracttype]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TreasuryConfig {
+    pub treasury_address: Address,
+    pub fee_basis_points: u32,
+}
+
 
 /// Tracks which signers have already approved a multi-sig release.
 #[contracttype]
@@ -81,6 +95,8 @@ pub enum DataKey {
     Admin,
     IsPaused,
     Lock,
+    Treasury
+
 }
 
 #[contracttype]
@@ -129,6 +145,20 @@ pub struct ReclaimedEvent {
     pub amount: i128,
     pub token: Address,
     pub timestamp: u64,
+}
+
+#[contracttype]
+pub struct TreasuryInitializedEvent {
+    pub treasury: Address,
+    pub fee_basis_points: u32,
+}
+
+#[contracttype]
+pub struct FeeCollectedEvent {
+    pub id: u64,
+    pub treasury: Address,
+    pub fee_amount: i128,
+    pub token: Address,
 }
 
 // Event emitted when a dispute is initiated on an escrow
@@ -199,6 +229,19 @@ impl EscrowContract {
         admin.require_auth();
         env.storage().instance().set(&DataKey::IsPaused, &true);
     }
+
+    /// amount * bps / 10_000, floored. Floor rounding guarantees
+/// fee + remainder == amount exactly — no dust is ever left behind.
+fn calculate_fee(amount: i128, fee_bps: u32) -> i128 {
+    amount
+        .checked_mul(fee_bps as i128)
+        .expect("fee calculation overflow")
+        / 10_000
+}
+
+fn get_treasury_config(env: &Env) -> Option<TreasuryConfig> {
+    env.storage().persistent().get(&DataKey::Treasury)
+}
 
     pub fn unpause(env: Env) {
         let admin: Address = env
@@ -461,26 +504,21 @@ impl EscrowContract {
             .get(&key)
             .expect("Escrow not found");
 
-        // Verify token matches initialized token
         if token != escrow.token {
             panic!("Token does not match the initialized token for this engagement");
         }
 
-        // Auth: Require the client's signature
         escrow.client.require_auth();
 
-        // Deadline check: prevent releasing funds after deadline has passed
         let current_time = env.ledger().timestamp();
         if current_time > escrow.deadline {
             panic!("Deadline has passed; cannot release funds");
         }
 
-        // Checks: Ensure the escrow status is Funded or InProgress
         if escrow.status != Status::Funded && escrow.status != Status::InProgress {
             panic!("Escrow is not funded or in progress");
         }
 
-        // Multi-sig check: if configured, verify threshold is met
         let cfg_key = DataKey::MultiSigConfig(engagement_id);
         if let Some(cfg) = env
             .storage()
@@ -498,34 +536,59 @@ impl EscrowContract {
             if approvals.approvals.len() < cfg.threshold {
                 panic!("Multi-sig threshold not met; more approvals required before release");
             }
-            // Clean up approvals storage after successful release
             env.storage().persistent().remove(&approvals_key);
         }
 
         Self::check_and_set_lock(&env);
-        // Logic: Transfer the appropriate amount from the contract to artisan.
-        // If materials were already released, only labor_amount remains.
-        // Otherwise, transfer the full remaining balance.
+
         let transfer_amount = if escrow.materials_released {
             escrow.labor_amount
         } else {
             escrow.material_amount + escrow.labor_amount
         };
-        let token_client = token::Client::new(&env, &token);
-        token_client.transfer(
-            &env.current_contract_address(),
-            &escrow.artisan,
-            &transfer_amount,
-        );
 
-        // State: Update the escrow status to Released
+        let token_client = token::Client::new(&env, &token);
+
+        if let Some(cfg) = Self::get_treasury_config(&env) {
+            let fee = Self::calculate_fee(transfer_amount, cfg.fee_basis_points);
+            let artisan_payout = transfer_amount - fee;
+
+            if fee > 0 {
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &cfg.treasury_address,
+                    &fee,
+                );
+                env.events().publish(
+                    (Symbol::new(&env, "fee_collected"), engagement_id),
+                    FeeCollectedEvent {
+                        id: engagement_id,
+                        treasury: cfg.treasury_address,
+                        fee_amount: fee,
+                        token: escrow.token.clone(),
+                    },
+                );
+            }
+            token_client.transfer(
+                &env.current_contract_address(),
+                &escrow.artisan,
+                &artisan_payout,
+            );
+        } else {
+            // No treasury configured — unchanged legacy behavior.
+            token_client.transfer(
+                &env.current_contract_address(),
+                &escrow.artisan,
+                &transfer_amount,
+            );
+        }
+
         escrow.status = Status::Released;
         env.storage().persistent().set(&key, &escrow);
         env.storage()
             .persistent()
             .extend_ttl(&key, TTL_THRESHOLD, ESCROW_TTL);
 
-        // Emit event
         env.events().publish(
             (Symbol::new(&env, "release"), engagement_id),
             FundsReleasedEvent {
@@ -539,7 +602,6 @@ impl EscrowContract {
 
         Self::clear_lock(&env);
     }
-
     /// Record a signer's approval for a multi-sig escrow release.
     ///
     /// Only addresses listed in the escrow's `multisig.required_signers` may call
@@ -813,6 +875,46 @@ impl EscrowContract {
             .extend_ttl(&DataKey::Oracle, TTL_THRESHOLD, NEXT_ID_TTL);
     }
 
+    /// Configure (or update) the protocol treasury and fee rate.
+/// Only the admin set via `init_admin` can call this.
+pub fn init_treasury(env: Env, admin: Address, treasury_address: Address, fee_basis_points: u32) {
+    let stored_admin: Address = env
+        .storage()
+        .instance()
+        .get(&DataKey::Admin)
+        .expect("Admin not set");
+    if admin != stored_admin {
+        panic!("Only admin can configure treasury");
+    }
+    admin.require_auth();
+
+    if fee_basis_points > MAX_FEE_BPS {
+        panic!("fee_basis_points exceeds maximum allowed (10%)");
+    }
+
+    let cfg = TreasuryConfig {
+        treasury_address: treasury_address.clone(),
+        fee_basis_points,
+    };
+    env.storage().persistent().set(&DataKey::Treasury, &cfg);
+    env.storage()
+        .persistent()
+        .extend_ttl(&DataKey::Treasury, TTL_THRESHOLD, NEXT_ID_TTL);
+
+    env.events().publish(
+        (Symbol::new(&env, "treasury_init"),),
+        TreasuryInitializedEvent {
+            treasury: treasury_address,
+            fee_basis_points,
+        },
+    );
+}
+
+/// Read the current treasury configuration, if any has been set.
+pub fn get_treasury(env: Env) -> Option<TreasuryConfig> {
+    Self::get_treasury_config(&env)
+}
+
     /// Transition escrow status from Funded to InProgress
     pub fn start_job(env: Env, engagement_id: u64) {
         assert!(!Self::is_paused(&env), "contract is paused");
@@ -901,7 +1003,6 @@ impl EscrowContract {
         token: Address,
     ) {
         assert!(!Self::is_paused(&env), "contract is paused");
-        // Load escrow
         let key = DataKey::Escrow(engagement_id);
         let mut escrow: Escrow = env
             .storage()
@@ -909,51 +1010,40 @@ impl EscrowContract {
             .get(&key)
             .expect("Escrow not found");
 
-        // Auth: Require the per-escrow arbitrator's authorization
         escrow.arbitrator.require_auth();
 
-        // State check: escrow must be in Disputed status
         if escrow.status != Status::Disputed {
             panic!("Escrow must be in Disputed status to resolve");
         }
 
-        // Validation: amounts must be non-negative
         if client_amount < 0 || artisan_amount < 0 {
             panic!("Distribution amounts must be non-negative");
         }
 
-        // Validation: distribution must equal total escrow amount
         let total = escrow.material_amount + escrow.labor_amount;
         if client_amount + artisan_amount != total {
             panic!("Distribution amounts must equal the escrowed amount");
         }
 
-        // Verify token matches initialized token
         if token != escrow.token {
             panic!("Token does not match the initialized token for this engagement");
         }
 
         Self::check_and_set_lock(&env);
 
-        // Status update based on distribution
         if artisan_amount == 0 {
-            // 100% to client = refund
             escrow.status = Status::Refunded;
         } else if client_amount == 0 {
-            // 100% to artisan = release
             escrow.status = Status::Released;
         } else {
-            // Split distribution
             escrow.status = Status::Resolved;
         }
 
-        // Save updated escrow
         env.storage().persistent().set(&key, &escrow);
         env.storage()
             .persistent()
             .extend_ttl(&key, TTL_THRESHOLD, ESCROW_TTL);
 
-        // Emit event
         let current_time = env.ledger().timestamp();
         env.events().publish(
             (Symbol::new(&env, "dispute_resolved"), engagement_id),
@@ -968,8 +1058,9 @@ impl EscrowContract {
             },
         );
 
-        // Logic: Transfer funds based on distribution
         let token_client = token::Client::new(&env, &token);
+
+        // Client refunds are never fee'd.
         if client_amount > 0 {
             token_client.transfer(
                 &env.current_contract_address(),
@@ -977,12 +1068,41 @@ impl EscrowContract {
                 &client_amount,
             );
         }
+
+        // Protocol fee applies only to the artisan's share, proportionately.
         if artisan_amount > 0 {
-            token_client.transfer(
-                &env.current_contract_address(),
-                &escrow.artisan,
-                &artisan_amount,
-            );
+            if let Some(cfg) = Self::get_treasury_config(&env) {
+                let fee = Self::calculate_fee(artisan_amount, cfg.fee_basis_points);
+                let artisan_payout = artisan_amount - fee;
+
+                if fee > 0 {
+                    token_client.transfer(
+                        &env.current_contract_address(),
+                        &cfg.treasury_address,
+                        &fee,
+                    );
+                    env.events().publish(
+                        (Symbol::new(&env, "fee_collected"), engagement_id),
+                        FeeCollectedEvent {
+                            id: engagement_id,
+                            treasury: cfg.treasury_address,
+                            fee_amount: fee,
+                            token: escrow.token.clone(),
+                        },
+                    );
+                }
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &escrow.artisan,
+                    &artisan_payout,
+                );
+            } else {
+                token_client.transfer(
+                    &env.current_contract_address(),
+                    &escrow.artisan,
+                    &artisan_amount,
+                );
+            }
         }
 
         Self::clear_lock(&env);
