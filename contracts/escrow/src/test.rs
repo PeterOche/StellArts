@@ -2272,7 +2272,7 @@ mod material_split_tests {
 #[cfg(test)]
 mod fee_tests {
     use crate::{DataKey, EscrowContract, EscrowContractClient, Status};
-    use soroban_sdk::testutils::{Address as AddressTestUtils, Ledger};
+    use soroban_sdk::testutils::Address as AddressTestUtils;
     use soroban_sdk::{token, vec, Address, Env};
 
     struct FeeCtx {
