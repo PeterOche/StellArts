@@ -182,7 +182,9 @@ def test_artisan_can_export_completed_jobs_as_csv(client):
     )
     assert profile_resp.status_code == 200
 
-    client_headers = get_auth_headers(client, "export-cli@test.com", "Pass123!", "client")
+    client_headers = get_auth_headers(
+        client, "export-cli@test.com", "Pass123!", "client"
+    )
 
     completed_booking_resp = client.post(
         "api/v1/bookings/create",
@@ -217,7 +219,9 @@ def test_artisan_can_export_completed_jobs_as_csv(client):
 
     db = TestingSessionLocal()
     try:
-        artisan = db.query(Artisan).filter(Artisan.id == profile_resp.json()["id"]).first()
+        artisan = (
+            db.query(Artisan).filter(Artisan.id == profile_resp.json()["id"]).first()
+        )
         completed_booking = (
             db.query(Booking).filter(Booking.id == completed_booking_id).first()
         )

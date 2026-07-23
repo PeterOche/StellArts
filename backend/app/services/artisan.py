@@ -177,8 +177,7 @@ class ArtisanService:
             amount_earned = sum(
                 Decimal(payment.amount)
                 for payment in booking.payments
-                if payment.status
-                not in {
+                if payment.status not in {
                     PaymentStatus.FAILED,
                     PaymentStatus.REFUNDED,
                     PaymentStatus.DISPUTED,
@@ -187,7 +186,10 @@ class ArtisanService:
 
             if amount_earned == 0:
                 amount_earned = Decimal(
-                    booking.estimated_cost or booking.labor_cost or booking.material_cost or 0
+                    booking.estimated_cost
+                    or booking.labor_cost
+                    or booking.material_cost
+                    or 0
                 )
 
             rating = ""

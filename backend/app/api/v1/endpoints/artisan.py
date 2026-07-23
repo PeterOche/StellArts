@@ -180,7 +180,11 @@ def export_my_work_history(
 
     filename = f"artisan-work-history-{artisan.id}.csv"
     headers = {"Content-Disposition": f'attachment; filename="{filename}"'}
-    return StreamingResponse(iter([output.getvalue()]), media_type="text/csv", headers=headers)
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers=headers,
+    )
 
 
 # Other artisan-related endpoints from main
