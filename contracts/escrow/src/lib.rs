@@ -35,7 +35,6 @@ pub struct TreasuryConfig {
     pub fee_basis_points: u32,
 }
 
-
 /// Tracks which signers have already approved a multi-sig release.
 #[contracttype]
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -95,8 +94,7 @@ pub enum DataKey {
     Admin,
     IsPaused,
     Lock,
-    Treasury
-
+    Treasury,
 }
 
 #[contracttype]
@@ -231,17 +229,17 @@ impl EscrowContract {
     }
 
     /// amount * bps / 10_000, floored. Floor rounding guarantees
-/// fee + remainder == amount exactly — no dust is ever left behind.
-fn calculate_fee(amount: i128, fee_bps: u32) -> i128 {
-    amount
-        .checked_mul(fee_bps as i128)
-        .expect("fee calculation overflow")
-        / 10_000
-}
+    /// fee + remainder == amount exactly — no dust is ever left behind.
+    fn calculate_fee(amount: i128, fee_bps: u32) -> i128 {
+        amount
+            .checked_mul(fee_bps as i128)
+            .expect("fee calculation overflow")
+            / 10_000
+    }
 
-fn get_treasury_config(env: &Env) -> Option<TreasuryConfig> {
-    env.storage().persistent().get(&DataKey::Treasury)
-}
+    fn get_treasury_config(env: &Env) -> Option<TreasuryConfig> {
+        env.storage().persistent().get(&DataKey::Treasury)
+    }
 
     pub fn unpause(env: Env) {
         let admin: Address = env
@@ -554,11 +552,7 @@ fn get_treasury_config(env: &Env) -> Option<TreasuryConfig> {
             let artisan_payout = transfer_amount - fee;
 
             if fee > 0 {
-                token_client.transfer(
-                    &env.current_contract_address(),
-                    &cfg.treasury_address,
-                    &fee,
-                );
+                token_client.transfer(&env.current_contract_address(), &cfg.treasury_address, &fee);
                 env.events().publish(
                     (Symbol::new(&env, "fee_collected"), engagement_id),
                     FeeCollectedEvent {
@@ -876,44 +870,49 @@ fn get_treasury_config(env: &Env) -> Option<TreasuryConfig> {
     }
 
     /// Configure (or update) the protocol treasury and fee rate.
-/// Only the admin set via `init_admin` can call this.
-pub fn init_treasury(env: Env, admin: Address, treasury_address: Address, fee_basis_points: u32) {
-    let stored_admin: Address = env
-        .storage()
-        .instance()
-        .get(&DataKey::Admin)
-        .expect("Admin not set");
-    if admin != stored_admin {
-        panic!("Only admin can configure treasury");
-    }
-    admin.require_auth();
+    /// Only the admin set via `init_admin` can call this.
+    pub fn init_treasury(
+        env: Env,
+        admin: Address,
+        treasury_address: Address,
+        fee_basis_points: u32,
+    ) {
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .expect("Admin not set");
+        if admin != stored_admin {
+            panic!("Only admin can configure treasury");
+        }
+        admin.require_auth();
 
-    if fee_basis_points > MAX_FEE_BPS {
-        panic!("fee_basis_points exceeds maximum allowed (10%)");
-    }
+        if fee_basis_points > MAX_FEE_BPS {
+            panic!("fee_basis_points exceeds maximum allowed (10%)");
+        }
 
-    let cfg = TreasuryConfig {
-        treasury_address: treasury_address.clone(),
-        fee_basis_points,
-    };
-    env.storage().persistent().set(&DataKey::Treasury, &cfg);
-    env.storage()
-        .persistent()
-        .extend_ttl(&DataKey::Treasury, TTL_THRESHOLD, NEXT_ID_TTL);
-
-    env.events().publish(
-        (Symbol::new(&env, "treasury_init"),),
-        TreasuryInitializedEvent {
-            treasury: treasury_address,
+        let cfg = TreasuryConfig {
+            treasury_address: treasury_address.clone(),
             fee_basis_points,
-        },
-    );
-}
+        };
+        env.storage().persistent().set(&DataKey::Treasury, &cfg);
+        env.storage()
+            .persistent()
+            .extend_ttl(&DataKey::Treasury, TTL_THRESHOLD, NEXT_ID_TTL);
 
-/// Read the current treasury configuration, if any has been set.
-pub fn get_treasury(env: Env) -> Option<TreasuryConfig> {
-    Self::get_treasury_config(&env)
-}
+        env.events().publish(
+            (Symbol::new(&env, "treasury_init"),),
+            TreasuryInitializedEvent {
+                treasury: treasury_address,
+                fee_basis_points,
+            },
+        );
+    }
+
+    /// Read the current treasury configuration, if any has been set.
+    pub fn get_treasury(env: Env) -> Option<TreasuryConfig> {
+        Self::get_treasury_config(&env)
+    }
 
     /// Transition escrow status from Funded to InProgress
     pub fn start_job(env: Env, engagement_id: u64) {

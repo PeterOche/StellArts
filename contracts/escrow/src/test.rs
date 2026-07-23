@@ -2381,10 +2381,18 @@ mod fee_tests {
 
         assert_eq!(ctx.token_client.balance(&treasury), 250);
         assert_eq!(ctx.token_client.balance(&artisan), 9_750);
-        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0, "no dust left behind");
+        assert_eq!(
+            ctx.token_client.balance(&ctx.contract_id),
+            0,
+            "no dust left behind"
+        );
 
         let escrow: crate::Escrow = ctx.env.as_contract(&ctx.contract_id, || {
-            ctx.env.storage().persistent().get(&DataKey::Escrow(id)).unwrap()
+            ctx.env
+                .storage()
+                .persistent()
+                .get(&DataKey::Escrow(id))
+                .unwrap()
         });
         assert_eq!(escrow.status, Status::Released);
     }
@@ -2406,7 +2414,11 @@ mod fee_tests {
 
         assert_eq!(fee, 25);
         assert_eq!(artisan_payout, 976);
-        assert_eq!(fee + artisan_payout, amount, "fee + payout must equal original amount");
+        assert_eq!(
+            fee + artisan_payout,
+            amount,
+            "fee + payout must equal original amount"
+        );
         assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
     }
 
@@ -2436,17 +2448,29 @@ mod fee_tests {
         let deadline = ctx.env.ledger().timestamp() + 86400;
 
         let id = ctx.client.initialize(
-            &client_addr, &artisan_addr, &arbitrator, &ctx.token_address,
-            &amount, &0i128, &deadline, &vec![&ctx.env], &0u32,
+            &client_addr,
+            &artisan_addr,
+            &arbitrator,
+            &ctx.token_address,
+            &amount,
+            &0i128,
+            &deadline,
+            &vec![&ctx.env],
+            &0u32,
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
         ctx.client.dispute(&id, &client_addr);
 
         // 60/40 split: client gets 6000 untouched, artisan share (4000) gets fee'd.
-        ctx.client.resolve_dispute(&id, &6_000, &4_000, &ctx.token_address);
+        ctx.client
+            .resolve_dispute(&id, &6_000, &4_000, &ctx.token_address);
 
-        assert_eq!(ctx.token_client.balance(&client_addr), 6_000, "client refund is never fee'd");
+        assert_eq!(
+            ctx.token_client.balance(&client_addr),
+            6_000,
+            "client refund is never fee'd"
+        );
         assert_eq!(ctx.token_client.balance(&treasury), 100); // 2.5% of 4000
         assert_eq!(ctx.token_client.balance(&artisan_addr), 3_900);
         assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
@@ -2466,17 +2490,29 @@ mod fee_tests {
         let deadline = ctx.env.ledger().timestamp() + 86400;
 
         let id = ctx.client.initialize(
-            &client_addr, &artisan_addr, &arbitrator, &ctx.token_address,
-            &amount, &0i128, &deadline, &vec![&ctx.env], &0u32,
+            &client_addr,
+            &artisan_addr,
+            &arbitrator,
+            &ctx.token_address,
+            &amount,
+            &0i128,
+            &deadline,
+            &vec![&ctx.env],
+            &0u32,
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
         ctx.client.dispute(&id, &artisan_addr);
 
-        ctx.client.resolve_dispute(&id, &amount, &0, &ctx.token_address);
+        ctx.client
+            .resolve_dispute(&id, &amount, &0, &ctx.token_address);
 
         assert_eq!(ctx.token_client.balance(&client_addr), amount);
-        assert_eq!(ctx.token_client.balance(&treasury), 0, "no fee on a full client refund");
+        assert_eq!(
+            ctx.token_client.balance(&treasury),
+            0,
+            "no fee on a full client refund"
+        );
     }
 
     /// F-9: A full release via dispute (client_amount == 0) still gets fee'd.
@@ -2493,14 +2529,22 @@ mod fee_tests {
         let deadline = ctx.env.ledger().timestamp() + 86400;
 
         let id = ctx.client.initialize(
-            &client_addr, &artisan_addr, &arbitrator, &ctx.token_address,
-            &amount, &0i128, &deadline, &vec![&ctx.env], &0u32,
+            &client_addr,
+            &artisan_addr,
+            &arbitrator,
+            &ctx.token_address,
+            &amount,
+            &0i128,
+            &deadline,
+            &vec![&ctx.env],
+            &0u32,
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
         ctx.client.dispute(&id, &client_addr);
 
-        ctx.client.resolve_dispute(&id, &0, &amount, &ctx.token_address);
+        ctx.client
+            .resolve_dispute(&id, &0, &amount, &ctx.token_address);
 
         assert_eq!(ctx.token_client.balance(&treasury), 200); // 2.5% of 8000
         assert_eq!(ctx.token_client.balance(&artisan_addr), 7_800);
@@ -2526,8 +2570,16 @@ mod fee_tests {
             let fee = ctx.token_client.balance(&treasury) - treasury_before;
             let payout = ctx.token_client.balance(&artisan) - artisan_before;
 
-            assert_eq!(fee + payout, amount, "amount={amount}: fee+payout must equal amount");
-            assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0, "amount={amount}: no dust");
+            assert_eq!(
+                fee + payout,
+                amount,
+                "amount={amount}: fee+payout must equal amount"
+            );
+            assert_eq!(
+                ctx.token_client.balance(&ctx.contract_id),
+                0,
+                "amount={amount}: no dust"
+            );
         }
     }
 
@@ -2539,7 +2591,8 @@ mod fee_tests {
         ctx.set_treasury(&treasury, 250);
 
         let (id, client_addr, artisan) = ctx.fund_engagement(2_000, 8_000);
-        ctx.client.release_materials(&id, &ctx.token_address, &client_addr);
+        ctx.client
+            .release_materials(&id, &ctx.token_address, &client_addr);
 
         // Materials (2000) went to artisan fee-free — only release() fees the payout.
         assert_eq!(ctx.token_client.balance(&artisan), 2_000);
