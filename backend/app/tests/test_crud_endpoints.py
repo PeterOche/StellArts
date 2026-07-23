@@ -2,6 +2,7 @@ import csv
 import io
 from datetime import datetime
 from decimal import Decimal
+from uuid import UUID
 
 from .conftest import TestingSessionLocal
 
@@ -200,7 +201,7 @@ def test_artisan_can_export_completed_jobs_as_csv(client):
         headers=client_headers,
     )
     assert completed_booking_resp.status_code == 201
-    completed_booking_id = completed_booking_resp.json()["id"]
+    completed_booking_id = UUID(completed_booking_resp.json()["id"])
 
     pending_booking_resp = client.post(
         "api/v1/bookings/create",
