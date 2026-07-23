@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 from decimal import Decimal
-import json
 
 from sqlalchemy import and_, or_
 from sqlalchemy.orm import Session, selectinload
