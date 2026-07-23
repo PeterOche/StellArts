@@ -177,7 +177,8 @@ class ArtisanService:
             amount_earned = sum(
                 Decimal(payment.amount)
                 for payment in booking.payments
-                if payment.status not in {
+                if payment.status
+                not in {
                     PaymentStatus.FAILED,
                     PaymentStatus.REFUNDED,
                     PaymentStatus.DISPUTED,
