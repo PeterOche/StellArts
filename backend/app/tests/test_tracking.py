@@ -37,9 +37,7 @@ def create_client_profile(client, client_headers):
         payload = decode_token(token)
         user_id = int(payload["sub"])
 
-        client_profile = (
-            db.query(Client).filter(Client.user_id == user_id).first()
-        )
+        client_profile = db.query(Client).filter(Client.user_id == user_id).first()
         if not client_profile:
             client_profile = Client(user_id=user_id, address="123 Test St")
             db.add(client_profile)
@@ -61,9 +59,7 @@ def create_artisan_profile(client, artisan_headers):
         payload = decode_token(token)
         user_id = int(payload["sub"])
 
-        artisan_profile = (
-            db.query(Artisan).filter(Artisan.user_id == user_id).first()
-        )
+        artisan_profile = db.query(Artisan).filter(Artisan.user_id == user_id).first()
         if not artisan_profile:
             artisan_profile = Artisan(
                 user_id=user_id,
@@ -91,9 +87,7 @@ def create_booking(client, client_headers, artisan_id):
 
         from app.models.client import Client
 
-        client_profile = (
-            db.query(Client).filter(Client.user_id == user_id).first()
-        )
+        client_profile = db.query(Client).filter(Client.user_id == user_id).first()
 
         booking = Booking(
             client_id=client_profile.id,

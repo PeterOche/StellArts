@@ -32,9 +32,7 @@ def create_client_profile(client, client_headers):
         payload = decode_token(token)
         user_id = int(payload["sub"])
 
-        client_profile = (
-            db.query(Client).filter(Client.user_id == user_id).first()
-        )
+        client_profile = db.query(Client).filter(Client.user_id == user_id).first()
         if not client_profile:
             client_profile = Client(user_id=user_id, address="123 Test St")
             db.add(client_profile)
@@ -177,9 +175,7 @@ class TestOpenRequestList:
         )
 
         # Search near NYC with small radius
-        resp = client.get(
-            "api/v1/requests?lat=40.7128&lng=-74.0060&radius_km=10"
-        )
+        resp = client.get("api/v1/requests?lat=40.7128&lng=-74.0060&radius_km=10")
         assert resp.status_code == 200
         data = resp.json()
         # Should only find the NYC job

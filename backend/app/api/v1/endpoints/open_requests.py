@@ -82,16 +82,15 @@ def create_open_request(
     summary="List open requests with optional location filtering",
 )
 def list_open_requests(
-    lat: float | None = Query(
-        None, ge=-90, le=90, description="Latitude for location filtering"
-    ),
-    lng: float | None = Query(
+    lat: float
+    | None = Query(None, ge=-90, le=90, description="Latitude for location filtering"),
+    lng: float
+    | None = Query(
         None, ge=-180, le=180, description="Longitude for location filtering"
     ),
     radius_km: float = Query(50, gt=0, description="Search radius in kilometers"),
-    status_filter: str | None = Query(
-        None, alias="status", description="Filter by status"
-    ),
+    status_filter: str
+    | None = Query(None, alias="status", description="Filter by status"),
     skip: int = Query(0, ge=0, description="Number of records to skip"),
     limit: int = Query(20, ge=1, le=100, description="Maximum number of records"),
     db: Session = Depends(get_db),
@@ -135,7 +134,7 @@ def list_open_requests(
 
         # Apply pagination
         total = len(filtered_results)
-        paginated = filtered_results[skip:skip + limit]
+        paginated = filtered_results[skip : skip + limit]
 
         return OpenRequestListResponse(
             items=[OpenRequestResponse.model_validate(r) for r in paginated],
@@ -190,9 +189,7 @@ def update_open_request(
     """
     from app.models.client import Client
 
-    client_profile = (
-        db.query(Client).filter(Client.user_id == current_user.id).first()
-    )
+    client_profile = db.query(Client).filter(Client.user_id == current_user.id).first()
     if not client_profile:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -248,9 +245,7 @@ def delete_open_request(
     """
     from app.models.client import Client
 
-    client_profile = (
-        db.query(Client).filter(Client.user_id == current_user.id).first()
-    )
+    client_profile = db.query(Client).filter(Client.user_id == current_user.id).first()
     if not client_profile:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

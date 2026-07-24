@@ -24,12 +24,8 @@ class OpenRequestCreate(BaseModel):
     title: str = Field(
         ..., min_length=1, max_length=255, description="Title of the request"
     )
-    description: str | None = Field(
-        None, description="Detailed description of the job"
-    )
-    budget: float | None = Field(
-        None, gt=0, description="Budget for the job"
-    )
+    description: str | None = Field(None, description="Detailed description of the job")
+    budget: float | None = Field(None, gt=0, description="Budget for the job")
     location_lat: float | None = Field(
         None, ge=-90, le=90, description="Latitude of the job location"
     )
