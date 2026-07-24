@@ -145,7 +145,9 @@ pub fn read_rating_count(env: &Env, user: &Address) -> u32 {
 }
 
 fn write_rating_count(env: &Env, user: &Address, count: u32) {
-    env.storage().persistent().set(&rating_count_key(user), &count);
+    env.storage()
+        .persistent()
+        .set(&rating_count_key(user), &count);
 }
 
 fn rating_key(user: &Address, index: u32) -> DataKey {
@@ -153,7 +155,9 @@ fn rating_key(user: &Address, index: u32) -> DataKey {
 }
 
 fn write_rating(env: &Env, user: &Address, index: u32, rating: &Rating) {
-    env.storage().persistent().set(&rating_key(user, index), rating);
+    env.storage()
+        .persistent()
+        .set(&rating_key(user, index), rating);
 }
 
 fn read_rating(env: &Env, user: &Address, index: u32) -> Rating {
@@ -792,7 +796,13 @@ mod tests {
                 &artisan,
                 EscrowContractStatus::Released,
             );
-            client.rate_artisan(&reviewer, &artisan, stars, &escrow_contract_id, &engagement_id);
+            client.rate_artisan(
+                &reviewer,
+                &artisan,
+                stars,
+                &escrow_contract_id,
+                &engagement_id,
+            );
         }
 
         assert_eq!(client.get_rating_count(&artisan), 5);
@@ -877,7 +887,13 @@ mod tests {
                 &artisan,
                 EscrowContractStatus::Released,
             );
-            client.rate_artisan(&reviewer, &artisan, stars, &escrow_contract_id, &engagement_id);
+            client.rate_artisan(
+                &reviewer,
+                &artisan,
+                stars,
+                &escrow_contract_id,
+                &engagement_id,
+            );
         }
 
         // Requesting far more than remains should just return what's left.
@@ -955,3 +971,6 @@ mod tests {
         assert_eq!(rating.timestamp, env.ledger().timestamp());
     }
 }
+
+#[cfg(test)]
+mod test;

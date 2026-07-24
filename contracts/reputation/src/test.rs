@@ -192,7 +192,13 @@ fn test_reputation_flow_with_paginated_ratings() {
             &artisan,
             EscrowContractStatus::Released,
         );
-        client.rate_artisan(&reviewer, &artisan, stars, &escrow_contract_id, &engagement_id);
+        client.rate_artisan(
+            &reviewer,
+            &artisan,
+            stars,
+            &escrow_contract_id,
+            &engagement_id,
+        );
     }
 
     // Total count reflects every rating, independent of pagination.
