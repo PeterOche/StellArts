@@ -112,7 +112,7 @@ def list_open_requests(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Invalid status: {status_filter}. Valid values: {valid_values}",
-            )
+            ) from None
     else:
         # Default to only OPEN requests
         query = query.filter(OpenRequest.status == OpenRequestStatus.OPEN)
@@ -224,7 +224,7 @@ def update_open_request(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=f"Invalid status: {value}",
-                )
+                ) from None
         setattr(open_request, field, value)
 
     db.commit()

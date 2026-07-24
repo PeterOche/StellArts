@@ -171,7 +171,12 @@ async def tracking_websocket(websocket: WebSocket, job_id: str):
     # Verify token and get user
     db = next(get_db())
     try:
-        payload = decode_token(token)
+        try:
+            payload = decode_token(token)
+        except Exception:
+            await websocket.close(code=4001, reason="Invalid token")
+            return
+
         if not payload:
             await websocket.close(code=4001, reason="Invalid token")
             return

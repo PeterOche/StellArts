@@ -1,4 +1,5 @@
 """Tests for Open Requests CRUD endpoints."""
+from app.tests.conftest import TestingSessionLocal
 
 
 def get_auth_headers(client, email, password, role):
@@ -22,21 +23,18 @@ def get_auth_headers(client, email, password, role):
 
 def create_client_profile(client, client_headers):
     """Helper to create a client profile."""
-    # Client profile is created in some setups, but we need to ensure it exists
+    from app.core.security import decode_token
     from app.models.client import Client
-    from app.db.session import SessionLocal
 
-    db = SessionLocal()
+    db = TestingSessionLocal()
     try:
-        # Get current user
-        from app.core.security import decode_token
-
         token = client_headers["Authorization"].split(" ")[1]
         payload = decode_token(token)
-        user_id = payload["sub"]
+        user_id = int(payload["sub"])
 
-        # Check if client profile exists
-        client_profile = db.query(Client).filter(Client.user_id == user_id).first()
+        client_profile = (
+            db.query(Client).filter(Client.user_id == user_id).first()
+        )
         if not client_profile:
             client_profile = Client(user_id=user_id, address="123 Test St")
             db.add(client_profile)

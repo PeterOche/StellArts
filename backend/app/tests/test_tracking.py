@@ -2,6 +2,9 @@
 from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from starlette.websockets import WebSocketDisconnect
+
+from app.tests.conftest import TestingSessionLocal
 
 
 def get_auth_headers(client, email, password, role):
@@ -25,17 +28,18 @@ def get_auth_headers(client, email, password, role):
 
 def create_client_profile(client, client_headers):
     """Helper to create a client profile."""
-    from app.models.client import Client
-    from app.db.session import SessionLocal
     from app.core.security import decode_token
+    from app.models.client import Client
 
-    db = SessionLocal()
+    db = TestingSessionLocal()
     try:
         token = client_headers["Authorization"].split(" ")[1]
         payload = decode_token(token)
-        user_id = payload["sub"]
+        user_id = int(payload["sub"])
 
-        client_profile = db.query(Client).filter(Client.user_id == user_id).first()
+        client_profile = (
+            db.query(Client).filter(Client.user_id == user_id).first()
+        )
         if not client_profile:
             client_profile = Client(user_id=user_id, address="123 Test St")
             db.add(client_profile)
@@ -48,17 +52,18 @@ def create_client_profile(client, client_headers):
 
 def create_artisan_profile(client, artisan_headers):
     """Helper to create an artisan profile."""
-    from app.models.artisan import Artisan
-    from app.db.session import SessionLocal
     from app.core.security import decode_token
+    from app.models.artisan import Artisan
 
-    db = SessionLocal()
+    db = TestingSessionLocal()
     try:
         token = artisan_headers["Authorization"].split(" ")[1]
         payload = decode_token(token)
-        user_id = payload["sub"]
+        user_id = int(payload["sub"])
 
-        artisan_profile = db.query(Artisan).filter(Artisan.user_id == user_id).first()
+        artisan_profile = (
+            db.query(Artisan).filter(Artisan.user_id == user_id).first()
+        )
         if not artisan_profile:
             artisan_profile = Artisan(
                 user_id=user_id,
@@ -75,19 +80,20 @@ def create_artisan_profile(client, artisan_headers):
 
 def create_booking(client, client_headers, artisan_id):
     """Helper to create a booking for testing."""
-    from app.models.booking import Booking, BookingStatus
-    from app.db.session import SessionLocal
     from app.core.security import decode_token
+    from app.models.booking import Booking, BookingStatus
 
-    db = SessionLocal()
+    db = TestingSessionLocal()
     try:
         token = client_headers["Authorization"].split(" ")[1]
         payload = decode_token(token)
-        user_id = payload["sub"]
+        user_id = int(payload["sub"])
 
         from app.models.client import Client
 
-        client_profile = db.query(Client).filter(Client.user_id == user_id).first()
+        client_profile = (
+            db.query(Client).filter(Client.user_id == user_id).first()
+        )
 
         booking = Booking(
             client_id=client_profile.id,
@@ -108,13 +114,13 @@ class TestWebSocketConnection:
 
     def test_websocket_missing_token(self, client):
         """Test that connection is rejected without a token."""
-        with pytest.raises(Exception):
+        with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect("/api/v1/tracking/some-job-id"):
                 pass  # Should not reach here
 
     def test_websocket_invalid_token(self, client):
         """Test that connection is rejected with invalid token."""
-        with pytest.raises(Exception):
+        with pytest.raises(WebSocketDisconnect):
             with client.websocket_connect(
                 "/api/v1/tracking/some-job-id?token=invalid-token"
             ):
@@ -218,14 +224,13 @@ class TestTokenVerification:
     def test_verify_artisan_token_valid(self, client):
         """Test valid artisan token verification."""
         from app.api.v1.endpoints.tracking import verify_artisan_token
-        from app.db.session import SessionLocal
 
         artisan_headers, artisan_token = get_auth_headers(
             client, "verify_artisan@test.com", "Pass123!", "artisan"
         )
         create_artisan_profile(client, artisan_headers)
 
-        db = SessionLocal()
+        db = TestingSessionLocal()
         try:
             user = verify_artisan_token(artisan_token, db)
             assert user is not None
@@ -236,13 +241,12 @@ class TestTokenVerification:
     def test_verify_artisan_token_client_rejected(self, client):
         """Test that client tokens are rejected for artisan verification."""
         from app.api.v1.endpoints.tracking import verify_artisan_token
-        from app.db.session import SessionLocal
 
         client_headers, client_token = get_auth_headers(
             client, "verify_client@test.com", "Pass123!", "client"
         )
 
-        db = SessionLocal()
+        db = TestingSessionLocal()
         try:
             user = verify_artisan_token(client_token, db)
             assert user is None
@@ -252,13 +256,12 @@ class TestTokenVerification:
     def test_verify_client_token_valid(self, client):
         """Test valid client token verification."""
         from app.api.v1.endpoints.tracking import verify_client_token
-        from app.db.session import SessionLocal
 
         client_headers, client_token = get_auth_headers(
             client, "verify_client2@test.com", "Pass123!", "client"
         )
 
-        db = SessionLocal()
+        db = TestingSessionLocal()
         try:
             user = verify_client_token(client_token, db)
             assert user is not None
@@ -269,13 +272,12 @@ class TestTokenVerification:
     def test_verify_client_token_artisan_rejected(self, client):
         """Test that artisan tokens are rejected for client verification."""
         from app.api.v1.endpoints.tracking import verify_client_token
-        from app.db.session import SessionLocal
 
         artisan_headers, artisan_token = get_auth_headers(
             client, "verify_artisan2@test.com", "Pass123!", "artisan"
         )
 
-        db = SessionLocal()
+        db = TestingSessionLocal()
         try:
             user = verify_client_token(artisan_token, db)
             assert user is None
