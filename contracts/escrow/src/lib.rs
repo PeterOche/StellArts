@@ -89,6 +89,12 @@ pub enum DataKey {
     EarlyReclaim(u64),
     MultiSigConfig(u64),
     MultiSigApprovals(u64),
+    /// Ordered milestone percentages (must sum to 100 when present).
+    Milestones(u64),
+    /// Index of the next milestone eligible for release.
+    NextMilestone(u64),
+    /// Cumulative amount already paid out via `release_milestone`.
+    MilestoneReleased(u64),
     NextId,
     Oracle,
     Admin,
@@ -130,6 +136,17 @@ pub struct MaterialsReleasedEvent {
     pub id: u64,
     pub client: Address,
     pub artisan: Address,
+    pub amount: i128,
+    pub token: Address,
+}
+
+#[contracttype]
+pub struct MilestoneReleasedEvent {
+    pub id: u64,
+    pub client: Address,
+    pub artisan: Address,
+    pub milestone_index: u32,
+    pub percentage: u32,
     pub amount: i128,
     pub token: Address,
 }
@@ -241,6 +258,86 @@ impl EscrowContract {
         env.storage().persistent().get(&DataKey::Treasury)
     }
 
+    fn has_milestones(env: &Env, engagement_id: u64) -> bool {
+        env.storage()
+            .persistent()
+            .has(&DataKey::Milestones(engagement_id))
+    }
+
+    fn validate_milestones(milestones: &Vec<u32>) {
+        if milestones.is_empty() {
+            return;
+        }
+        let mut total: u32 = 0;
+        for pct in milestones.iter() {
+            if pct == 0 {
+                panic!("Milestone percentages must be greater than zero");
+            }
+            total = total
+                .checked_add(pct)
+                .unwrap_or_else(|| panic!("Milestone percentage overflow"));
+        }
+        if total != 100 {
+            panic!("Milestone percentages must sum to exactly 100");
+        }
+    }
+
+    /// Remaining tokens still held by the contract for this engagement.
+    fn remaining_escrow_balance(env: &Env, engagement_id: u64, escrow: &Escrow) -> i128 {
+        let total = escrow.material_amount + escrow.labor_amount;
+        if Self::has_milestones(env, engagement_id) {
+            let released: i128 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::MilestoneReleased(engagement_id))
+                .unwrap_or(0);
+            return total - released;
+        }
+        if escrow.materials_released {
+            escrow.labor_amount
+        } else {
+            total
+        }
+    }
+
+    fn pay_artisan_with_optional_fee(
+        env: &Env,
+        engagement_id: u64,
+        escrow: &Escrow,
+        token: &Address,
+        transfer_amount: i128,
+    ) {
+        let token_client = token::Client::new(env, token);
+        if let Some(cfg) = Self::get_treasury_config(env) {
+            let fee = Self::calculate_fee(transfer_amount, cfg.fee_basis_points);
+            let artisan_payout = transfer_amount - fee;
+
+            if fee > 0 {
+                token_client.transfer(&env.current_contract_address(), &cfg.treasury_address, &fee);
+                env.events().publish(
+                    (Symbol::new(env, "fee_collected"), engagement_id),
+                    FeeCollectedEvent {
+                        id: engagement_id,
+                        treasury: cfg.treasury_address,
+                        fee_amount: fee,
+                        token: escrow.token.clone(),
+                    },
+                );
+            }
+            token_client.transfer(
+                &env.current_contract_address(),
+                &escrow.artisan,
+                &artisan_payout,
+            );
+        } else {
+            token_client.transfer(
+                &env.current_contract_address(),
+                &escrow.artisan,
+                &transfer_amount,
+            );
+        }
+    }
+
     pub fn unpause(env: Env) {
         let admin: Address = env
             .storage()
@@ -266,6 +363,10 @@ impl EscrowContract {
     /// enable multi-sig release for high-value jobs.  When multi-sig is enabled,
     /// `release` will require that at least `multisig_threshold` of the listed
     /// signers have called `multisig_approve` before funds are transferred.
+    ///
+    /// Pass `milestones` as percentages of the total escrow (e.g. `[25, 25, 50]`).
+    /// When non-empty they must sum to exactly 100 and funds are unlocked via
+    /// `release_milestone`. An empty list keeps the legacy all-or-nothing `release` flow.
     #[allow(clippy::too_many_arguments)]
     pub fn initialize(
         env: Env,
@@ -278,6 +379,7 @@ impl EscrowContract {
         deadline: u64,
         multisig_signers: Vec<Address>,
         multisig_threshold: u32,
+        milestones: Vec<u32>,
     ) -> u64 {
         assert!(!Self::is_paused(&env), "contract is paused");
         // Validation: client cannot be the same as artisan
@@ -298,6 +400,8 @@ impl EscrowContract {
         if total <= 0 {
             panic!("Total amount must be greater than zero");
         }
+
+        Self::validate_milestones(&milestones);
 
         // Multi-sig validation
         let multisig: Option<MultiSigConfig> = if multisig_signers.is_empty() {
@@ -325,6 +429,26 @@ impl EscrowContract {
             env.storage()
                 .persistent()
                 .extend_ttl(&cfg_key, TTL_THRESHOLD, ESCROW_TTL);
+        }
+
+        if !milestones.is_empty() {
+            let milestones_key = DataKey::Milestones(engagement_id);
+            env.storage().persistent().set(&milestones_key, &milestones);
+            env.storage()
+                .persistent()
+                .extend_ttl(&milestones_key, TTL_THRESHOLD, ESCROW_TTL);
+
+            let next_key = DataKey::NextMilestone(engagement_id);
+            env.storage().persistent().set(&next_key, &0u32);
+            env.storage()
+                .persistent()
+                .extend_ttl(&next_key, TTL_THRESHOLD, ESCROW_TTL);
+
+            let released_key = DataKey::MilestoneReleased(engagement_id);
+            env.storage().persistent().set(&released_key, &0i128);
+            env.storage()
+                .persistent()
+                .extend_ttl(&released_key, TTL_THRESHOLD, ESCROW_TTL);
         }
 
         // Create the escrow record
@@ -458,6 +582,10 @@ impl EscrowContract {
             panic!("Materials have already been released for this engagement");
         }
 
+        if Self::has_milestones(&env, engagement_id) {
+            panic!("Use release_milestone for milestone-based escrows");
+        }
+
         // Transfer material_amount to artisan
         let token_client = token::Client::new(&env, &token);
         token_client.transfer(
@@ -517,6 +645,10 @@ impl EscrowContract {
             panic!("Escrow is not funded or in progress");
         }
 
+        if Self::has_milestones(&env, engagement_id) {
+            panic!("Use release_milestone for milestone-based escrows");
+        }
+
         let cfg_key = DataKey::MultiSigConfig(engagement_id);
         if let Some(cfg) = env
             .storage()
@@ -545,37 +677,7 @@ impl EscrowContract {
             escrow.material_amount + escrow.labor_amount
         };
 
-        let token_client = token::Client::new(&env, &token);
-
-        if let Some(cfg) = Self::get_treasury_config(&env) {
-            let fee = Self::calculate_fee(transfer_amount, cfg.fee_basis_points);
-            let artisan_payout = transfer_amount - fee;
-
-            if fee > 0 {
-                token_client.transfer(&env.current_contract_address(), &cfg.treasury_address, &fee);
-                env.events().publish(
-                    (Symbol::new(&env, "fee_collected"), engagement_id),
-                    FeeCollectedEvent {
-                        id: engagement_id,
-                        treasury: cfg.treasury_address,
-                        fee_amount: fee,
-                        token: escrow.token.clone(),
-                    },
-                );
-            }
-            token_client.transfer(
-                &env.current_contract_address(),
-                &escrow.artisan,
-                &artisan_payout,
-            );
-        } else {
-            // No treasury configured — unchanged legacy behavior.
-            token_client.transfer(
-                &env.current_contract_address(),
-                &escrow.artisan,
-                &transfer_amount,
-            );
-        }
+        Self::pay_artisan_with_optional_fee(&env, engagement_id, &escrow, &token, transfer_amount);
 
         escrow.status = Status::Released;
         env.storage().persistent().set(&key, &escrow);
@@ -596,6 +698,152 @@ impl EscrowContract {
 
         Self::clear_lock(&env);
     }
+
+    /// Release funds for the current active milestone.
+    ///
+    /// Milestones must be released in order (index 0, then 1, …). The final
+    /// milestone pays any remainder so rounding never leaves dust in the contract.
+    /// After the last milestone is paid, status becomes `Released`.
+    pub fn release_milestone(env: Env, engagement_id: u64, token: Address) {
+        assert!(!Self::is_paused(&env), "contract is paused");
+        let key = DataKey::Escrow(engagement_id);
+        let mut escrow: Escrow = env
+            .storage()
+            .persistent()
+            .get(&key)
+            .expect("Escrow not found");
+
+        if token != escrow.token {
+            panic!("Token does not match the initialized token for this engagement");
+        }
+
+        escrow.client.require_auth();
+
+        let current_time = env.ledger().timestamp();
+        if current_time > escrow.deadline {
+            panic!("Deadline has passed; cannot release funds");
+        }
+
+        let milestones_key = DataKey::Milestones(engagement_id);
+        let milestones: Vec<u32> = env
+            .storage()
+            .persistent()
+            .get(&milestones_key)
+            .unwrap_or_else(|| panic!("Escrow has no milestones configured"));
+
+        let next_key = DataKey::NextMilestone(engagement_id);
+        let next_index: u32 = env.storage().persistent().get(&next_key).unwrap_or(0);
+
+        if next_index >= milestones.len() {
+            panic!("All milestones have already been released");
+        }
+
+        if escrow.status != Status::Funded && escrow.status != Status::InProgress {
+            panic!("Escrow is not funded or in progress");
+        }
+
+        let cfg_key = DataKey::MultiSigConfig(engagement_id);
+        if let Some(cfg) = env
+            .storage()
+            .persistent()
+            .get::<DataKey, MultiSigConfig>(&cfg_key)
+        {
+            let approvals_key = DataKey::MultiSigApprovals(engagement_id);
+            let approvals: MultiSigApprovals = env
+                .storage()
+                .persistent()
+                .get(&approvals_key)
+                .unwrap_or(MultiSigApprovals {
+                    approvals: vec![&env],
+                });
+            if approvals.approvals.len() < cfg.threshold {
+                panic!("Multi-sig threshold not met; more approvals required before release");
+            }
+            // Approvals gate the full payout sequence; clear once the last milestone pays.
+            if next_index + 1 >= milestones.len() {
+                env.storage().persistent().remove(&approvals_key);
+            }
+        }
+
+        Self::check_and_set_lock(&env);
+
+        let total = escrow.material_amount + escrow.labor_amount;
+        let released_key = DataKey::MilestoneReleased(engagement_id);
+        let already_released: i128 = env.storage().persistent().get(&released_key).unwrap_or(0);
+
+        let percentage = milestones.get(next_index).unwrap();
+        let is_last = next_index + 1 >= milestones.len();
+        let transfer_amount = if is_last {
+            total - already_released
+        } else {
+            total
+                .checked_mul(percentage as i128)
+                .unwrap_or_else(|| panic!("milestone amount overflow"))
+                / 100
+        };
+
+        if transfer_amount <= 0 {
+            panic!("Milestone payout must be positive");
+        }
+
+        Self::pay_artisan_with_optional_fee(&env, engagement_id, &escrow, &token, transfer_amount);
+
+        let new_released = already_released + transfer_amount;
+        env.storage().persistent().set(&released_key, &new_released);
+        env.storage()
+            .persistent()
+            .extend_ttl(&released_key, TTL_THRESHOLD, ESCROW_TTL);
+
+        let new_index = next_index + 1;
+        env.storage().persistent().set(&next_key, &new_index);
+        env.storage()
+            .persistent()
+            .extend_ttl(&next_key, TTL_THRESHOLD, ESCROW_TTL);
+        env.storage()
+            .persistent()
+            .extend_ttl(&milestones_key, TTL_THRESHOLD, ESCROW_TTL);
+
+        if is_last {
+            escrow.status = Status::Released;
+        }
+
+        env.storage().persistent().set(&key, &escrow);
+        env.storage()
+            .persistent()
+            .extend_ttl(&key, TTL_THRESHOLD, ESCROW_TTL);
+
+        env.events().publish(
+            (Symbol::new(&env, "release_milestone"), engagement_id),
+            MilestoneReleasedEvent {
+                id: engagement_id,
+                client: escrow.client.clone(),
+                artisan: escrow.artisan.clone(),
+                milestone_index: next_index,
+                percentage,
+                amount: transfer_amount,
+                token: escrow.token.clone(),
+            },
+        );
+
+        Self::clear_lock(&env);
+    }
+
+    /// Milestone percentages configured for an engagement (empty if none).
+    pub fn get_milestones(env: Env, engagement_id: u64) -> Vec<u32> {
+        env.storage()
+            .persistent()
+            .get(&DataKey::Milestones(engagement_id))
+            .unwrap_or(vec![&env])
+    }
+
+    /// Index of the next milestone to release (equal to milestone count when finished).
+    pub fn get_next_milestone(env: Env, engagement_id: u64) -> u32 {
+        env.storage()
+            .persistent()
+            .get(&DataKey::NextMilestone(engagement_id))
+            .unwrap_or(0)
+    }
+
     /// Record a signer's approval for a multi-sig escrow release.
     ///
     /// Only addresses listed in the escrow's `multisig.required_signers` may call
@@ -713,14 +961,11 @@ impl EscrowContract {
         }
 
         Self::check_and_set_lock(&env);
-        // Determine refund amount: if materials have been released, the client
-        // only gets the locked labor amount back (materials cost is already paid
-        // to the artisan). Otherwise, the full balance is returned.
-        let refund_amount = if escrow.materials_released {
-            escrow.labor_amount
-        } else {
-            escrow.material_amount + escrow.labor_amount
-        };
+        // Refund whatever is still locked (accounts for materials or milestones).
+        let refund_amount = Self::remaining_escrow_balance(&env, engagement_id, &escrow);
+        if refund_amount <= 0 {
+            panic!("No funds remaining to reclaim");
+        }
 
         // Transfer funds back to the client
         let token_client = token::Client::new(&env, &token);
@@ -993,7 +1238,7 @@ impl EscrowContract {
     /// Resolve a dispute by the per-escrow arbitrator
     /// Only callable by the arbitrator assigned at escrow initialization
     /// Supports split distribution: funds can be divided between client and artisan
-    /// The sum of client_amount and artisan_amount must equal the escrowed amount
+    /// The sum of client_amount and artisan_amount must equal the remaining escrowed amount
     pub fn resolve_dispute(
         env: Env,
         engagement_id: u64,
@@ -1019,9 +1264,9 @@ impl EscrowContract {
             panic!("Distribution amounts must be non-negative");
         }
 
-        let total = escrow.material_amount + escrow.labor_amount;
-        if client_amount + artisan_amount != total {
-            panic!("Distribution amounts must equal the escrowed amount");
+        let remaining = Self::remaining_escrow_balance(&env, engagement_id, &escrow);
+        if client_amount + artisan_amount != remaining {
+            panic!("Distribution amounts must equal the remaining escrowed amount");
         }
 
         if token != escrow.token {
@@ -1149,6 +1394,15 @@ impl EscrowContract {
             if env.storage().persistent().has(&approvals_key) {
                 env.storage().persistent().remove(&approvals_key);
             }
+            for aux in [
+                DataKey::Milestones(engagement_id),
+                DataKey::NextMilestone(engagement_id),
+                DataKey::MilestoneReleased(engagement_id),
+            ] {
+                if env.storage().persistent().has(&aux) {
+                    env.storage().persistent().remove(&aux);
+                }
+            }
         }
     }
 }
@@ -1187,6 +1441,7 @@ mod test_legacy {
             &deadline,
             &soroban_sdk::vec![&env],
             &0u32,
+            &soroban_sdk::vec![&env],
         );
 
         // Verify the returned ID is valid (should be 1 for first engagement)
@@ -1243,6 +1498,7 @@ mod test_legacy {
             &deadline,
             &soroban_sdk::vec![&env],
             &0u32,
+            &soroban_sdk::vec![&env],
         );
     }
 
@@ -1271,6 +1527,7 @@ mod test_legacy {
             &deadline,
             &soroban_sdk::vec![&env],
             &0u32,
+            &soroban_sdk::vec![&env],
         );
     }
 
@@ -1299,6 +1556,7 @@ mod test_legacy {
             &deadline,
             &soroban_sdk::vec![&env],
             &0u32,
+            &soroban_sdk::vec![&env],
         );
     }
 
