@@ -92,6 +92,7 @@ mod happy_path_tests {
                 &deadline,
                 &soroban_sdk::vec![&self.env],
                 &0u32,
+                &soroban_sdk::vec![&self.env],
             )
         }
 
@@ -438,6 +439,7 @@ mod happy_path_tests {
             &deadline,
             &soroban_sdk::vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
 
         // fund and deposit before the deadline
@@ -755,7 +757,7 @@ mod happy_path_tests {
 
     /// Test 20: Resolve dispute - distribution amounts that don't sum to escrow amount should fail
     #[test]
-    #[should_panic(expected = "Distribution amounts must equal the escrowed amount")]
+    #[should_panic(expected = "Distribution amounts must equal the remaining escrowed amount")]
     fn test_resolve_dispute_invalid_amounts() {
         let ctx = TestContext::new();
         let (client, artisan) = create_addresses(&ctx.env);
@@ -936,6 +938,7 @@ mod happy_path_tests {
             &deadline,
             &soroban_sdk::vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
 
         ctx.mint_tokens(&client, amount);
@@ -969,6 +972,7 @@ mod happy_path_tests {
             &deadline,
             &soroban_sdk::vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
 
         ctx.mint_tokens(&client, amount);
@@ -1007,6 +1011,7 @@ mod happy_path_tests {
             &deadline,
             &soroban_sdk::vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
 
         ctx.mint_tokens(&client, amount);
@@ -1150,6 +1155,7 @@ mod ttl_snapshot_tests {
                 &deadline,
                 &soroban_sdk::vec![&self.env],
                 &0u32,
+                &soroban_sdk::vec![&self.env],
             );
             self.token_asset_client
                 .mint(&client_addr, &(material_amount + labor_amount));
@@ -1196,6 +1202,7 @@ mod ttl_snapshot_tests {
             &deadline,
             &soroban_sdk::vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
 
         // Advance a few days before depositing
@@ -1259,6 +1266,7 @@ mod ttl_snapshot_tests {
             &deadline,
             &soroban_sdk::vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &500i128);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -1362,6 +1370,7 @@ mod multisig_tests {
             &deadline,
             &vec![&ctx.env], // empty → no multisig
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -1401,6 +1410,7 @@ mod multisig_tests {
             &deadline,
             &signers,
             &2u32, // 2-of-2
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -1447,6 +1457,7 @@ mod multisig_tests {
             &deadline,
             &signers,
             &2u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -1481,6 +1492,7 @@ mod multisig_tests {
             &deadline,
             &signers,
             &1u32, // 1-of-2
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -1516,6 +1528,7 @@ mod multisig_tests {
             &deadline,
             &signers,
             &1u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -1547,6 +1560,7 @@ mod multisig_tests {
             &deadline,
             &signers,
             &1u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -1577,6 +1591,7 @@ mod multisig_tests {
             &deadline,
             &signers,
             &0u32, // invalid
+            &soroban_sdk::vec![&ctx.env],
         );
     }
 
@@ -1602,6 +1617,7 @@ mod multisig_tests {
             &deadline,
             &signers,
             &3u32, // threshold > signers count
+            &soroban_sdk::vec![&ctx.env],
         );
     }
 }
@@ -1662,6 +1678,7 @@ mod cleanup_tests {
                 &deadline,
                 &vec![&self.env],
                 &0u32,
+                &soroban_sdk::vec![&self.env],
             );
             self.token_asset_client.mint(&client_addr, &amount);
             self.client.deposit(&id, &self.token_address);
@@ -1685,6 +1702,7 @@ mod cleanup_tests {
                 &deadline,
                 &vec![&self.env],
                 &0u32,
+                &soroban_sdk::vec![&self.env],
             );
             self.token_asset_client.mint(&client_addr, &amount);
             self.client.deposit(&id, &self.token_address);
@@ -1781,6 +1799,7 @@ mod cleanup_tests {
             &deadline,
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -1895,6 +1914,7 @@ mod reentrancy_tests {
             &deadline,
             &vec![&env],
             &0u32,
+            &soroban_sdk::vec![&env],
         );
 
         // Setup malicious token to know the escrow address and engagement id
@@ -1985,6 +2005,7 @@ mod material_split_tests {
             &(ctx.env.ledger().timestamp() + 86400),
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client, &(mat + lab));
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2028,6 +2049,7 @@ mod material_split_tests {
             &(ctx.env.ledger().timestamp() + 86400),
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client, &(mat + lab));
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2059,6 +2081,7 @@ mod material_split_tests {
             &(ctx.env.ledger().timestamp() + 86400),
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client, &(mat + lab));
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2095,6 +2118,7 @@ mod material_split_tests {
             &(ctx.env.ledger().timestamp() + 86400),
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client, &(mat + lab));
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2123,6 +2147,7 @@ mod material_split_tests {
             &(ctx.env.ledger().timestamp() + 86400),
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client, &(mat + lab));
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2162,6 +2187,7 @@ mod material_split_tests {
             &deadline,
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client, &(mat + lab));
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2212,6 +2238,7 @@ mod material_split_tests {
             &deadline,
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client, &total);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2252,6 +2279,7 @@ mod material_split_tests {
             &(ctx.env.ledger().timestamp() + 86400),
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client, &total);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2330,6 +2358,7 @@ mod fee_tests {
                 &deadline,
                 &vec![&self.env],
                 &0u32,
+                &soroban_sdk::vec![&self.env],
             );
             self.token_asset_client
                 .mint(&client_addr, &(material + labor));
@@ -2457,6 +2486,7 @@ mod fee_tests {
             &deadline,
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2499,6 +2529,7 @@ mod fee_tests {
             &deadline,
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2538,6 +2569,7 @@ mod fee_tests {
             &deadline,
             &vec![&ctx.env],
             &0u32,
+            &soroban_sdk::vec![&ctx.env],
         );
         ctx.token_asset_client.mint(&client_addr, &amount);
         ctx.client.deposit(&id, &ctx.token_address);
@@ -2603,5 +2635,241 @@ mod fee_tests {
         assert_eq!(ctx.token_client.balance(&treasury), 200); // 2.5% of 8000
         assert_eq!(ctx.token_client.balance(&artisan), 2_000 + 7_800);
         assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Milestone-based partial release tests
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod milestone_tests {
+    use crate::{EscrowContract, EscrowContractClient, Status};
+    use soroban_sdk::testutils::{Address as AddressTestUtils, Ledger};
+    use soroban_sdk::{token, vec, Address, Env};
+
+    struct MilestoneCtx {
+        env: Env,
+        contract_id: Address,
+        token_address: Address,
+        client: EscrowContractClient<'static>,
+        token_client: token::Client<'static>,
+        token_asset_client: token::StellarAssetClient<'static>,
+    }
+
+    impl MilestoneCtx {
+        fn new() -> Self {
+            let env = Env::default();
+            env.mock_all_auths_allowing_non_root_auth();
+            let contract_id = env.register_contract(None, EscrowContract);
+            let token_admin = Address::generate(&env);
+            let tc = env.register_stellar_asset_contract_v2(token_admin);
+            let token_address = tc.address();
+            let client = EscrowContractClient::new(&env, &contract_id);
+            let token_client = token::Client::new(&env, &token_address);
+            let token_asset_client = token::StellarAssetClient::new(&env, &token_address);
+            Self {
+                env,
+                contract_id,
+                token_address,
+                client,
+                token_client,
+                token_asset_client,
+            }
+        }
+
+        fn fund_with_milestones(
+            &self,
+            material: i128,
+            labor: i128,
+            milestones: soroban_sdk::Vec<u32>,
+        ) -> (u64, Address, Address) {
+            let client_addr = Address::generate(&self.env);
+            let artisan = Address::generate(&self.env);
+            let arbitrator = Address::generate(&self.env);
+            let deadline = self.env.ledger().timestamp() + 86_400;
+            let id = self.client.initialize(
+                &client_addr,
+                &artisan,
+                &arbitrator,
+                &self.token_address,
+                &material,
+                &labor,
+                &deadline,
+                &vec![&self.env],
+                &0u32,
+                &milestones,
+            );
+            let total = material + labor;
+            self.token_asset_client.mint(&client_addr, &total);
+            self.client.deposit(&id, &self.token_address);
+            (id, client_addr, artisan)
+        }
+    }
+
+    #[test]
+    fn test_milestone_multi_stage_release_flow() {
+        let ctx = MilestoneCtx::new();
+        let milestones = vec![&ctx.env, 25u32, 25u32, 50u32];
+        let total = 10_000i128;
+        let (id, _client, artisan) = ctx.fund_with_milestones(total, 0, milestones);
+
+        assert_eq!(ctx.client.get_next_milestone(&id), 0);
+        assert_eq!(
+            ctx.client.get_milestones(&id),
+            vec![&ctx.env, 25u32, 25u32, 50u32]
+        );
+
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        assert_eq!(ctx.token_client.balance(&artisan), 2_500);
+        assert_eq!(ctx.client.get_next_milestone(&id), 1);
+        assert_eq!(ctx.client.get_engagement(&id).status, Status::Funded);
+
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        assert_eq!(ctx.token_client.balance(&artisan), 5_000);
+        assert_eq!(ctx.client.get_next_milestone(&id), 2);
+
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        assert_eq!(ctx.token_client.balance(&artisan), 10_000);
+        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+        assert_eq!(ctx.client.get_next_milestone(&id), 3);
+        assert_eq!(ctx.client.get_engagement(&id).status, Status::Released);
+    }
+
+    #[test]
+    fn test_milestone_last_payout_absorbs_rounding_dust() {
+        let ctx = MilestoneCtx::new();
+        // 33+33+34 = 100; total 1000 → 330 + 330 + 340
+        let milestones = vec![&ctx.env, 33u32, 33u32, 34u32];
+        let (id, _client, artisan) = ctx.fund_with_milestones(1_000, 0, milestones);
+
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        ctx.client.release_milestone(&id, &ctx.token_address);
+
+        assert_eq!(ctx.token_client.balance(&artisan), 1_000);
+        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+    }
+
+    #[test]
+    #[should_panic(expected = "All milestones have already been released")]
+    fn test_milestone_cannot_release_past_final() {
+        let ctx = MilestoneCtx::new();
+        let milestones = vec![&ctx.env, 50u32, 50u32];
+        let (id, _client, _artisan) = ctx.fund_with_milestones(1_000, 0, milestones);
+
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        // Third call — nothing left
+        ctx.client.release_milestone(&id, &ctx.token_address);
+    }
+
+    #[test]
+    #[should_panic(expected = "Use release_milestone for milestone-based escrows")]
+    fn test_milestone_blocks_legacy_release() {
+        let ctx = MilestoneCtx::new();
+        let milestones = vec![&ctx.env, 40u32, 60u32];
+        let (id, _client, _artisan) = ctx.fund_with_milestones(1_000, 0, milestones);
+        ctx.client.release(&id, &ctx.token_address);
+    }
+
+    #[test]
+    #[should_panic(expected = "Use release_milestone for milestone-based escrows")]
+    fn test_milestone_blocks_release_materials() {
+        let ctx = MilestoneCtx::new();
+        let milestones = vec![&ctx.env, 40u32, 60u32];
+        let (id, client_addr, _artisan) = ctx.fund_with_milestones(400, 600, milestones);
+        ctx.client
+            .release_materials(&id, &ctx.token_address, &client_addr);
+    }
+
+    #[test]
+    #[should_panic(expected = "Escrow has no milestones configured")]
+    fn test_release_milestone_requires_milestones() {
+        let ctx = MilestoneCtx::new();
+        let (id, _client, _artisan) = ctx.fund_with_milestones(1_000, 0, vec![&ctx.env]);
+        ctx.client.release_milestone(&id, &ctx.token_address);
+    }
+
+    #[test]
+    #[should_panic(expected = "Milestone percentages must sum to exactly 100")]
+    fn test_milestones_must_sum_to_100() {
+        let ctx = MilestoneCtx::new();
+        let client_addr = Address::generate(&ctx.env);
+        let artisan = Address::generate(&ctx.env);
+        let arbitrator = Address::generate(&ctx.env);
+        let deadline = ctx.env.ledger().timestamp() + 86_400;
+        ctx.client.initialize(
+            &client_addr,
+            &artisan,
+            &arbitrator,
+            &ctx.token_address,
+            &1_000i128,
+            &0i128,
+            &deadline,
+            &vec![&ctx.env],
+            &0u32,
+            &vec![&ctx.env, 25u32, 25u32, 25u32], // 75 != 100
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "Milestone percentages must be greater than zero")]
+    fn test_milestone_zero_percentage_rejected() {
+        let ctx = MilestoneCtx::new();
+        let client_addr = Address::generate(&ctx.env);
+        let artisan = Address::generate(&ctx.env);
+        let arbitrator = Address::generate(&ctx.env);
+        let deadline = ctx.env.ledger().timestamp() + 86_400;
+        ctx.client.initialize(
+            &client_addr,
+            &artisan,
+            &arbitrator,
+            &ctx.token_address,
+            &1_000i128,
+            &0i128,
+            &deadline,
+            &vec![&ctx.env],
+            &0u32,
+            &vec![&ctx.env, 0u32, 100u32],
+        );
+    }
+
+    #[test]
+    fn test_milestone_reclaim_returns_only_remaining() {
+        let ctx = MilestoneCtx::new();
+        let milestones = vec![&ctx.env, 25u32, 75u32];
+        let total = 4_000i128;
+        let (id, client_addr, artisan) = ctx.fund_with_milestones(total, 0, milestones);
+
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        assert_eq!(ctx.token_client.balance(&artisan), 1_000);
+
+        // Jump past deadline + grace period (24h)
+        ctx.env.ledger().with_mut(|li| {
+            li.timestamp += 86_400 + 86_400 + 1;
+        });
+
+        assert!(ctx.client.reclaim(&id, &ctx.token_address));
+        assert_eq!(ctx.token_client.balance(&client_addr), 3_000);
+        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+        assert_eq!(ctx.client.get_engagement(&id).status, Status::Refunded);
+    }
+
+    #[test]
+    fn test_sequential_milestones_cannot_skip_ahead() {
+        // release_milestone always pays the current index; there is no way to
+        // request milestone 2 before milestone 1. Verify ordering via index.
+        let ctx = MilestoneCtx::new();
+        let milestones = vec![&ctx.env, 10u32, 20u32, 70u32];
+        let (id, _client, artisan) = ctx.fund_with_milestones(1_000, 0, milestones);
+
+        assert_eq!(ctx.client.get_next_milestone(&id), 0);
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        assert_eq!(ctx.token_client.balance(&artisan), 100); // 10%
+        assert_eq!(ctx.client.get_next_milestone(&id), 1);
+
+        ctx.client.release_milestone(&id, &ctx.token_address);
+        assert_eq!(ctx.token_client.balance(&artisan), 300); // +20%
+        assert_eq!(ctx.client.get_next_milestone(&id), 2);
     }
 }
