@@ -2265,3 +2265,343 @@ mod material_split_tests {
         assert!(!escrow.materials_released);
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Issue #XXX – Protocol fee / treasury tests
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod fee_tests {
+    use crate::{DataKey, EscrowContract, EscrowContractClient, Status};
+    use soroban_sdk::testutils::Address as AddressTestUtils;
+    use soroban_sdk::{token, vec, Address, Env};
+
+    struct FeeCtx {
+        env: Env,
+        contract_id: Address,
+        token_address: Address,
+        admin: Address,
+        client: EscrowContractClient<'static>,
+        token_client: token::Client<'static>,
+        token_asset_client: token::StellarAssetClient<'static>,
+    }
+
+    impl FeeCtx {
+        fn new() -> Self {
+            let env = Env::default();
+            env.mock_all_auths_allowing_non_root_auth();
+            let contract_id = env.register_contract(None, EscrowContract);
+            let admin = Address::generate(&env);
+            let token_admin = Address::generate(&env);
+            let tc = env.register_stellar_asset_contract_v2(token_admin);
+            let token_address = tc.address();
+            let client = EscrowContractClient::new(&env, &contract_id);
+            let token_client = token::Client::new(&env, &token_address);
+            let token_asset_client = token::StellarAssetClient::new(&env, &token_address);
+
+            client.init_admin(&admin);
+
+            FeeCtx {
+                env,
+                contract_id,
+                token_address,
+                admin,
+                client,
+                token_client,
+                token_asset_client,
+            }
+        }
+
+        fn set_treasury(&self, treasury: &Address, bps: u32) {
+            self.client.init_treasury(&self.admin, treasury, &bps);
+        }
+
+        fn fund_engagement(&self, material: i128, labor: i128) -> (u64, Address, Address) {
+            let client_addr = Address::generate(&self.env);
+            let artisan_addr = Address::generate(&self.env);
+            let arbitrator = Address::generate(&self.env);
+            let deadline = self.env.ledger().timestamp() + 86400;
+            let id = self.client.initialize(
+                &client_addr,
+                &artisan_addr,
+                &arbitrator,
+                &self.token_address,
+                &material,
+                &labor,
+                &deadline,
+                &vec![&self.env],
+                &0u32,
+            );
+            self.token_asset_client
+                .mint(&client_addr, &(material + labor));
+            self.client.deposit(&id, &self.token_address);
+            (id, client_addr, artisan_addr)
+        }
+    }
+
+    /// F-1: Admin can set treasury + fee rate, and it's readable back.
+    #[test]
+    fn test_init_treasury_sets_config() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 250);
+
+        let cfg = ctx.client.get_treasury().unwrap();
+        assert_eq!(cfg.treasury_address, treasury);
+        assert_eq!(cfg.fee_basis_points, 250);
+    }
+
+    /// F-2: Non-admin cannot configure treasury.
+    #[test]
+    #[should_panic(expected = "Only admin can configure treasury")]
+    fn test_init_treasury_unauthorized_fails() {
+        let ctx = FeeCtx::new();
+        let not_admin = Address::generate(&ctx.env);
+        let treasury = Address::generate(&ctx.env);
+        ctx.client.init_treasury(&not_admin, &treasury, &250);
+    }
+
+    /// F-3: Fee rate above the 10% cap is rejected.
+    #[test]
+    #[should_panic(expected = "fee_basis_points exceeds maximum allowed")]
+    fn test_init_treasury_exceeds_max_bps_fails() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 1001);
+    }
+
+    /// F-4: release() splits exactly — 2.5% on a clean amount, no dust in contract.
+    #[test]
+    fn test_release_deducts_fee_exact_math() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 250); // 2.5%
+
+        let (id, _client, artisan) = ctx.fund_engagement(10_000, 0);
+        ctx.client.release(&id, &ctx.token_address);
+
+        assert_eq!(ctx.token_client.balance(&treasury), 250);
+        assert_eq!(ctx.token_client.balance(&artisan), 9_750);
+        assert_eq!(
+            ctx.token_client.balance(&ctx.contract_id),
+            0,
+            "no dust left behind"
+        );
+
+        let escrow: crate::Escrow = ctx.env.as_contract(&ctx.contract_id, || {
+            ctx.env
+                .storage()
+                .persistent()
+                .get(&DataKey::Escrow(id))
+                .unwrap()
+        });
+        assert_eq!(escrow.status, Status::Released);
+    }
+
+    /// F-5: Fee rounds down (floor); artisan absorbs the fractional remainder,
+    /// so fee + artisan payout always equals the original amount exactly.
+    #[test]
+    fn test_release_fee_rounding_no_dust() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 250); // 2.5%
+
+        let amount: i128 = 1_001; // 1001 * 250 / 10000 = 25.025 -> floors to 25
+        let (id, _client, artisan) = ctx.fund_engagement(amount, 0);
+        ctx.client.release(&id, &ctx.token_address);
+
+        let fee = ctx.token_client.balance(&treasury);
+        let artisan_payout = ctx.token_client.balance(&artisan);
+
+        assert_eq!(fee, 25);
+        assert_eq!(artisan_payout, 976);
+        assert_eq!(
+            fee + artisan_payout,
+            amount,
+            "fee + payout must equal original amount"
+        );
+        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+    }
+
+    /// F-6: With no treasury configured, behavior is unchanged (100% to artisan).
+    #[test]
+    fn test_release_without_treasury_configured_full_amount_to_artisan() {
+        let ctx = FeeCtx::new();
+        let (id, _client, artisan) = ctx.fund_engagement(5_000, 0);
+        ctx.client.release(&id, &ctx.token_address);
+
+        assert_eq!(ctx.token_client.balance(&artisan), 5_000);
+        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+    }
+
+    /// F-7: resolve_dispute() split — fee is deducted only from the artisan's
+    /// share; the client's share is untouched.
+    #[test]
+    fn test_resolve_dispute_fee_applied_to_artisan_share_only() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 250); // 2.5%
+
+        let client_addr = Address::generate(&ctx.env);
+        let artisan_addr = Address::generate(&ctx.env);
+        let arbitrator = Address::generate(&ctx.env);
+        let amount: i128 = 10_000;
+        let deadline = ctx.env.ledger().timestamp() + 86400;
+
+        let id = ctx.client.initialize(
+            &client_addr,
+            &artisan_addr,
+            &arbitrator,
+            &ctx.token_address,
+            &amount,
+            &0i128,
+            &deadline,
+            &vec![&ctx.env],
+            &0u32,
+        );
+        ctx.token_asset_client.mint(&client_addr, &amount);
+        ctx.client.deposit(&id, &ctx.token_address);
+        ctx.client.dispute(&id, &client_addr);
+
+        // 60/40 split: client gets 6000 untouched, artisan share (4000) gets fee'd.
+        ctx.client
+            .resolve_dispute(&id, &6_000, &4_000, &ctx.token_address);
+
+        assert_eq!(
+            ctx.token_client.balance(&client_addr),
+            6_000,
+            "client refund is never fee'd"
+        );
+        assert_eq!(ctx.token_client.balance(&treasury), 100); // 2.5% of 4000
+        assert_eq!(ctx.token_client.balance(&artisan_addr), 3_900);
+        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+    }
+
+    /// F-8: A full refund to the client (artisan_amount == 0) is never fee'd.
+    #[test]
+    fn test_resolve_dispute_full_refund_no_fee() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 250);
+
+        let client_addr = Address::generate(&ctx.env);
+        let artisan_addr = Address::generate(&ctx.env);
+        let arbitrator = Address::generate(&ctx.env);
+        let amount: i128 = 5_000;
+        let deadline = ctx.env.ledger().timestamp() + 86400;
+
+        let id = ctx.client.initialize(
+            &client_addr,
+            &artisan_addr,
+            &arbitrator,
+            &ctx.token_address,
+            &amount,
+            &0i128,
+            &deadline,
+            &vec![&ctx.env],
+            &0u32,
+        );
+        ctx.token_asset_client.mint(&client_addr, &amount);
+        ctx.client.deposit(&id, &ctx.token_address);
+        ctx.client.dispute(&id, &artisan_addr);
+
+        ctx.client
+            .resolve_dispute(&id, &amount, &0, &ctx.token_address);
+
+        assert_eq!(ctx.token_client.balance(&client_addr), amount);
+        assert_eq!(
+            ctx.token_client.balance(&treasury),
+            0,
+            "no fee on a full client refund"
+        );
+    }
+
+    /// F-9: A full release via dispute (client_amount == 0) still gets fee'd.
+    #[test]
+    fn test_resolve_dispute_full_release_fee_applied() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 250);
+
+        let client_addr = Address::generate(&ctx.env);
+        let artisan_addr = Address::generate(&ctx.env);
+        let arbitrator = Address::generate(&ctx.env);
+        let amount: i128 = 8_000;
+        let deadline = ctx.env.ledger().timestamp() + 86400;
+
+        let id = ctx.client.initialize(
+            &client_addr,
+            &artisan_addr,
+            &arbitrator,
+            &ctx.token_address,
+            &amount,
+            &0i128,
+            &deadline,
+            &vec![&ctx.env],
+            &0u32,
+        );
+        ctx.token_asset_client.mint(&client_addr, &amount);
+        ctx.client.deposit(&id, &ctx.token_address);
+        ctx.client.dispute(&id, &client_addr);
+
+        ctx.client
+            .resolve_dispute(&id, &0, &amount, &ctx.token_address);
+
+        assert_eq!(ctx.token_client.balance(&treasury), 200); // 2.5% of 8000
+        assert_eq!(ctx.token_client.balance(&artisan_addr), 7_800);
+        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+    }
+
+    /// F-10: Invariant sweep — for a range of odd amounts, fee + artisan payout
+    /// always reconstructs the original amount exactly, and no dust is ever
+    /// left in the contract.
+    #[test]
+    fn test_fee_math_no_dust_across_many_amounts() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 333); // an intentionally "ugly" 3.33%
+
+        for amount in [1i128, 7, 99, 1_001, 123_457, 999_999, 10_000_000] {
+            let (id, _client, artisan) = ctx.fund_engagement(amount, 0);
+            let treasury_before = ctx.token_client.balance(&treasury);
+            let artisan_before = ctx.token_client.balance(&artisan);
+
+            ctx.client.release(&id, &ctx.token_address);
+
+            let fee = ctx.token_client.balance(&treasury) - treasury_before;
+            let payout = ctx.token_client.balance(&artisan) - artisan_before;
+
+            assert_eq!(
+                fee + payout,
+                amount,
+                "amount={amount}: fee+payout must equal amount"
+            );
+            assert_eq!(
+                ctx.token_client.balance(&ctx.contract_id),
+                0,
+                "amount={amount}: no dust"
+            );
+        }
+    }
+
+    /// F-11: Materials-released path still respects the fee on the labor remainder.
+    #[test]
+    fn test_release_fee_applies_to_remaining_labor_after_materials_released() {
+        let ctx = FeeCtx::new();
+        let treasury = Address::generate(&ctx.env);
+        ctx.set_treasury(&treasury, 250);
+
+        let (id, client_addr, artisan) = ctx.fund_engagement(2_000, 8_000);
+        ctx.client
+            .release_materials(&id, &ctx.token_address, &client_addr);
+
+        // Materials (2000) went to artisan fee-free — only release() fees the payout.
+        assert_eq!(ctx.token_client.balance(&artisan), 2_000);
+
+        ctx.client.release(&id, &ctx.token_address);
+
+        // Fee applies only to the labor_amount (8000) remaining in the contract.
+        assert_eq!(ctx.token_client.balance(&treasury), 200); // 2.5% of 8000
+        assert_eq!(ctx.token_client.balance(&artisan), 2_000 + 7_800);
+        assert_eq!(ctx.token_client.balance(&ctx.contract_id), 0);
+    }
+}

@@ -1,5 +1,5 @@
 [package]
-name = "escrow"
+name = "staking"
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -9,7 +9,6 @@ soroban-sdk.workspace = true
 
 [dev-dependencies]
 soroban-sdk = { workspace = true, features = ["testutils"] }
-ed25519-dalek = "=2.2.0"
 
 [lib]
 crate-type = ["cdylib", "rlib"]
