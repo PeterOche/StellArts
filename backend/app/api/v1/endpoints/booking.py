@@ -358,7 +358,11 @@ def update_booking_status(
 
     # Trigger real-time notifications based on new status
     try:
-        if new_status == BookingStatus.CONFIRMED and booking.client and booking.client.user_id:
+        if (
+            new_status == BookingStatus.CONFIRMED
+            and booking.client
+            and booking.client.user_id
+        ):
             asyncio.create_task(
                 notification_service.create_notification(
                     db=db,

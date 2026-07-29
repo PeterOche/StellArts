@@ -161,7 +161,11 @@ def test_delete_notification(client):
 
 
 def test_websocket_stream_connection(client):
-    with patch("app.api.v1.endpoints.notifications.is_token_blacklisted", return_value=False):
+    with patch(
+        "app.api.v1.endpoints.notifications.is_token_blacklisted", return_value=False
+    ):
         _, token, _ = get_authenticated_client_and_user(client)
-        with client.websocket_connect(f"/api/v1/notifications/stream?token={token}") as websocket:
+        with client.websocket_connect(
+            f"/api/v1/notifications/stream?token={token}"
+        ) as websocket:
             assert websocket is not None

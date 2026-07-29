@@ -41,8 +41,12 @@ async def create_notification(
         "is_read": notification.is_read,
         "read": notification.is_read,
         "reference_id": notification.reference_id,
-        "created_at": notification.created_at.isoformat() if notification.created_at else None,
-        "updated_at": notification.updated_at.isoformat() if notification.updated_at else None,
+        "created_at": (
+            notification.created_at.isoformat() if notification.created_at else None
+        ),
+        "updated_at": (
+            notification.updated_at.isoformat() if notification.updated_at else None
+        ),
     }
 
     try:
