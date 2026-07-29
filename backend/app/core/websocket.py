@@ -1,5 +1,4 @@
 import logging
-from typing import Dict, List
 
 from fastapi import WebSocket
 
@@ -9,7 +8,7 @@ logger = logging.getLogger(__name__)
 class ConnectionManager:
     def __init__(self):
         # Maps user_id -> list of active WebSocket connections
-        self.active_connections: Dict[int, List[WebSocket]] = {}
+        self.active_connections: dict[int, list[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id: int):
         await websocket.accept()

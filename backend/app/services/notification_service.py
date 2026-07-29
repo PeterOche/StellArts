@@ -1,5 +1,4 @@
 import logging
-from typing import Optional
 
 from sqlalchemy.orm import Session
 
@@ -15,7 +14,7 @@ async def create_notification(
     type: str,
     title: str,
     message: str,
-    reference_id: Optional[str] = None,
+    reference_id: str | None = None,
 ) -> Notification:
     """
     Creates a persistent Notification record in DB and broadcasts it via WebSocket

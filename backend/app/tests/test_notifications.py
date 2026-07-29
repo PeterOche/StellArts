@@ -1,8 +1,8 @@
 from unittest.mock import patch
 
-from app.models.notification import Notification
 from app.db.session import get_db
 from app.main import app
+from app.models.notification import Notification
 
 
 def get_authenticated_client_and_user(client):

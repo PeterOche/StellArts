@@ -1,7 +1,14 @@
-from typing import List, Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from sqlalchemy.orm import Session
 
 from app.core.auth import get_current_user
@@ -15,7 +22,7 @@ from app.schemas.notification import NotificationOut, UnreadCountResponse
 router = APIRouter(prefix="/notifications", tags=["notifications"])
 
 
-@router.get("/", response_model=List[NotificationOut])
+@router.get("/", response_model=list[NotificationOut])
 def get_notifications(
     skip: int = Query(0, ge=0),
     limit: int = Query(50, ge=1, le=100),
@@ -46,7 +53,7 @@ def get_unread_count(
     """
     count = (
         db.query(Notification)
-        .filter(Notification.user_id == current_user.id, Notification.is_read == False)
+        .filter(Notification.user_id == current_user.id, not Notification.is_read)
         .count()
     )
     return {"unread_count": count}
@@ -91,7 +98,7 @@ def mark_all_as_read(
     """
     db.query(Notification).filter(
         Notification.user_id == current_user.id,
-        Notification.is_read == False,
+        not Notification.is_read,
     ).update({"is_read": True}, synchronize_session=False)
     db.commit()
     return {"message": "All notifications marked as read"}
@@ -128,7 +135,7 @@ def delete_notification(
 @router.websocket("/stream")
 async def websocket_endpoint(
     websocket: WebSocket,
-    token: Optional[str] = Query(None),
+    token: str | None = Query(None),
     db: Session = Depends(get_db),
 ):
     """
